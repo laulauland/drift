@@ -7,9 +7,10 @@
     "typecheck": "tsgo --noEmit",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
+    "lint:ast-grep": "ast-grep scan --config .ast-grep/sgconfig.yml --error",
     "format": "oxfmt . --write",
     "format:check": "oxfmt . --check",
-    "check": "bun run lint && bun run format:check && bun run typecheck"
+    "check": "bun run lint:ast-grep && bun run lint && bun run format:check && bun run typecheck"
   },
   "dependencies": {
     "@effect/language-service": "^0.73.1"

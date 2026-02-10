@@ -17,6 +17,7 @@ Lint/format with OXC:
 ```bash
 bun run lint
 bun run lint:fix
+bun run lint:ast-grep
 bun run format
 bun run format:check
 bun run check

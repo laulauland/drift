@@ -1,0 +1,7 @@
+id: no-svelte-stores
+language: typescript
+message: Use $state() rune instead of writable/readable/derived stores
+severity: error
+rule:
+  kind: import_statement
+  regex: from\s+["']svelte\/store["']
