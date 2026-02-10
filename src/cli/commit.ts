@@ -1,3 +1,4 @@
+import { parseProjectVcsBackend } from "../core/vcs.ts";
 import {
   loadProject,
   updateCellCommitRef,
@@ -71,10 +72,14 @@ export const runCommitCommand = (args: readonly string[], context: CliContext): 
 
   const commitMessage = createCommitMessage(targetCells);
   const commitFiles = context.dependencies?.commitFiles ?? commitFilesWithDetectedVcs;
+  const configuredBackend = parseProjectVcsBackend(project.configRaw);
+  const targetCellIndices = targetCells.map((cell) => cell.index);
   const commitResult = commitFiles({
     cwd: context.cwd,
+    backend: configuredBackend,
     files: [...allFiles],
     message: commitMessage,
+    cellIndices: targetCellIndices,
   });
 
   if (!commitResult.ok) {
@@ -84,7 +89,7 @@ export const runCommitCommand = (args: readonly string[], context: CliContext): 
 
   const updateResult = updateCellCommitRef({
     project,
-    cellIndexes: targetCells.map((cell) => cell.index),
+    cellIndexes: targetCellIndices,
     ref: commitResult.ref,
   });
 

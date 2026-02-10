@@ -1,8 +1,12 @@
+import type { VcsBackendPreference } from "../core/vcs.ts";
+
 export interface CliDependencies {
   readonly commitFiles: (args: {
     readonly cwd: string;
+    readonly backend: VcsBackendPreference;
     readonly files: readonly string[];
     readonly message: string;
+    readonly cellIndices: readonly number[];
   }) =>
     | {
         readonly ok: true;
