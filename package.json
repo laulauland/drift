@@ -15,7 +15,8 @@
     "check": "bun run lint:ast-grep && bun run lint && bun run format:check && bun run typecheck"
   },
   "dependencies": {
-    "@effect/language-service": "^0.73.1"
+    "@effect/language-service": "^0.73.1",
+    "effect": "^3.19.16"
   },
   "devDependencies": {
     "@types/bun": "latest",
