@@ -94,6 +94,27 @@ describe("drift CLI", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
+  test("plan command creates the next version snapshot", () => {
+    const cwd = createTempDirectory();
+
+    expect(runCliInDirectory(["new"], cwd).exitCode).toBe(0);
+    writeCell({
+      cwd,
+      index: 1,
+      content: "## Routes <!-- depends: 0 -->\n\nDraft route requirements.",
+    });
+
+    const planResult = runCliInDirectory(["plan", "1"], cwd);
+
+    expect(planResult.exitCode).toBe(0);
+    expect(existsSync(join(cwd, ".drift", "cells", "1", "v2.md"))).toBe(true);
+
+    const plannedContent = readFileSync(join(cwd, ".drift", "cells", "1", "v2.md"), "utf8");
+    expect(plannedContent).toContain("<!-- drift:planned");
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
   test("assemble and init roundtrip", () => {
     const source = createTempDirectory();
 
@@ -146,6 +167,30 @@ describe("drift CLI", () => {
     );
 
     expect(buildYaml).toContain("ref: deadbeef");
+
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  test("commit command surfaces VCS failure from dependency", () => {
+    const cwd = createTempDirectory();
+
+    expect(runCliInDirectory(["new"], cwd).exitCode).toBe(0);
+    writeCell({
+      cwd,
+      index: 1,
+      content: "## Database <!-- depends: 0 -->\n\nCreate database setup.",
+    });
+    expect(runCliInDirectory(["run", "--no-stream"], cwd).exitCode).toBe(0);
+
+    const commitResult = runCliInDirectory(["commit", "1"], cwd, {
+      commitFiles: () => ({
+        ok: false,
+        message: "simulated VCS failure",
+      }),
+    });
+
+    expect(commitResult.exitCode).toBe(1);
+    expect(commitResult.stderr).toEqual(["Commit failed: simulated VCS failure"]);
 
     rmSync(cwd, { recursive: true, force: true });
   });
