@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare release metadata
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      body: ${{ steps.notes.outputs.body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute tag/name
+        id: meta
+        run: |
+          echo "tag=nightly-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "name=Nightly ${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force
+
+          LAST_TAG="$(git tag --list 'nightly-*' --sort=-creatordate | head -n 1 || true)"
+          if [ -n "${LAST_TAG}" ] && git merge-base --is-ancestor "${LAST_TAG}" HEAD; then
+            RANGE="${LAST_TAG}..HEAD"
+            LOG_ARGS=("${RANGE}")
+          elif [ -n "${LAST_TAG}" ]; then
+            SINCE="$(git log -1 --format=%cI "${LAST_TAG}")"
+            LOG_ARGS=("--since=${SINCE}" "HEAD")
+          else
+            LOG_ARGS=("HEAD")
+          fi
+
+          NOTES="$(
+            git log "${LOG_ARGS[@]}" --format=%B%x00 \
+              | awk -v RS='\0' '
+                function rtrim(s){ sub(/[[:space:]]+$/, "", s); return s }
+                function ltrim(s){ sub(/^[[:space:]]+/, "", s); return s }
+                function trim(s){ return rtrim(ltrim(s)) }
+                function is_trailer(line){ return line ~ /^[A-Za-z0-9-]+: .+/ }
+
+                function strip_trailers(n,   i){
+                  i = n
+                  while (i >= 1) {
+                    if (lines[i] ~ /^[[:space:]]*$/) { i--; continue }
+                    if (is_trailer(lines[i])) { i--; continue }
+                    break
+                  }
+                  return i
+                }
+
+                function emit_entry(entry,   lines_n, j, line, id, cleaned, key){
+                  lines_n = split(entry, entry_lines, "\n")
+                  id = ""
+                  cleaned = ""
+                  for (j = 1; j <= lines_n; j++) {
+                    line = entry_lines[j]
+                    if (line ~ /^RN-ID:[[:space:]]*/) {
+                      id = line
+                      sub(/^RN-ID:[[:space:]]*/, "", id)
+                      continue
+                    }
+                    cleaned = cleaned line "\n"
+                  }
+                  cleaned = rtrim(cleaned)
+
+                  key = (id != "" ? "id:" id : cleaned)
+                  gsub(/[[:space:]]+$/, "", key)
+                  gsub(/\n{3,}/, "\n\n", key)
+
+                  if (!(key in seen) && length(trim(cleaned)) > 0) {
+                    seen[key] = 1
+                    if (out != "") out = out "\n\n"
+                    out = out cleaned
+                  }
+                }
+
+                {
+                  if ($0 == "") next
+
+                  n = split($0, lines, "\n")
+                  n = strip_trailers(n)
+
+                  in_rn = 0
+                  entry = ""
+                  for (i = 1; i <= n; i++) {
+                    line = lines[i]
+
+                    if (line ~ /^##[[:space:]]*RN:?[[:space:]]*$/) {
+                      in_rn = 1
+                      continue
+                    }
+
+                    if (in_rn && line ~ /^##[[:space:]]+[^#]/) {
+                      break
+                    }
+
+                    if (in_rn) {
+                      entry = entry line "\n"
+                    }
+                  }
+
+                  entry = rtrim(entry)
+                  while (entry ~ /^[[:space:]]*\n/) sub(/^[[:space:]]*\n/, "", entry)
+                  while (entry ~ /\n[[:space:]]*$/) sub(/\n[[:space:]]*$/, "", entry)
+
+                  if (in_rn) emit_entry(entry)
+                }
+
+                END {
+                  print out
+                }
+              '
+          )"
+
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="_No release notes in this push. Add a \`## RN:\` section to commit bodies._"
+          fi
+
+          BODY=$(cat <<EOF
+          ## RN
+
+          ${NOTES}
+
+          ---
+
+          Built from \`${GITHUB_SHA}\`.
+          EOF
+          )
+
+          {
+            echo "body<<__RELEASE_BODY__"
+            echo "$BODY"
+            echo "__RELEASE_BODY__"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-macos
+            runner: macos-latest
+            zig-target: aarch64-macos
+          - target: x86_64-macos
+            runner: macos-latest
+            zig-target: x86_64-macos
+          - target: x86_64-linux
+            runner: ubuntu-22.04
+            zig-target: x86_64-linux-gnu
+          - target: aarch64-linux
+            runner: ubuntu-22.04
+            zig-target: aarch64-linux-gnu
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.zig-target }}
+
+      - name: Package
+        run: |
+          tar -czf drift-${{ matrix.target }}.tar.gz -C zig-out/bin drift
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-${{ matrix.target }}
+          path: drift-${{ matrix.target }}.tar.gz
+
+  release:
+    name: Create release
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.name }}
+          body: ${{ needs.prepare.outputs.body }}
+          prerelease: true
+          files: drift-*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

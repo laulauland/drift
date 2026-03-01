@@ -1,3 +1,9 @@
+---
+drift:
+  files:
+    - src/main.zig
+---
+
 # drift
 
 Bind specs to code. Lint for drift.
@@ -42,16 +48,17 @@ drift lint
 Link a binding with provenance:
 
 ```
-drift link docs/auth.md src/auth/session.ts@qpvuntsm
+drift link docs/auth.md src/auth/session.ts
 ```
+
+When running `drift link` without a `@change` suffix, drift auto-appends the current HEAD (git) or current change ID (jj) as provenance.
 
 ## Commands
 
 ```
-drift init          Create .drift/config.yaml in current directory
-drift lint          Check all specs for staleness
+drift lint          Check all specs for staleness (exits 1 if stale)
 drift status        Show all specs and their bindings
-drift link          Add a binding (with optional provenance) to a spec
+drift link          Add a binding to a spec (auto-appends provenance)
 drift unlink        Remove a binding from a spec
 ```
 
@@ -61,7 +68,27 @@ For each spec, drift finds the last VCS commit that modified the spec file. Then
 
 For symbol-level bindings (`#AuthConfig`), drift parses the bound file with tree-sitter and hashes just the symbol's content. The spec is stale only if that specific symbol changed — not the whole file.
 
-Staleness output includes blame: who changed the bound code, in which commit, with what message.
+Staleness is reported with a reason:
+
+```
+$ drift lint
+
+docs/auth.md
+  STALE   src/auth/provider.ts#AuthConfig
+          changed after spec
+  STALE   src/core/old-module.ts
+          file not found
+
+docs/payments.md
+  ok
+
+1 spec stale, 1 ok
+```
+
+Reasons include:
+- **changed after spec** — the bound file (or symbol) was modified after the spec
+- **file not found** — the bound file no longer exists
+- **symbol not found** — the bound symbol no longer exists in the file
 
 ## VCS support
 

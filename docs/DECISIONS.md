@@ -1,3 +1,11 @@
+---
+drift:
+  files:
+    - src/main.zig
+    - src/symbols.zig
+    - src/vcs.zig
+---
+
 # Decisions
 
 ## 1. Zig over TypeScript
@@ -44,7 +52,7 @@ File-level bindings are coarse. If a spec binds to `src/auth/provider.ts` and so
 
 Symbol-level bindings (`src/auth/provider.ts#AuthConfig`) resolve to a specific AST declaration. Only changes to that symbol trigger staleness. This uses tree-sitter with per-language `.scm` queries — the same infrastructure lore uses, but without the full extraction pipeline.
 
-The resolution is simple: parse file → run query → filter by symbol name → hash the matched node's text. If the symbol is not found, the binding is broken (not silently ignored).
+The resolution is simple: parse file, run query, filter by symbol name, hash the matched node's text. If the symbol is not found, the binding is reported as STALE with reason "symbol not found".
 
 We chose tree-sitter over regex because:
 - Regex breaks on string literals containing declaration keywords

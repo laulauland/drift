@@ -1,3 +1,13 @@
+---
+drift:
+  files:
+    - src/main.zig
+    - src/frontmatter.zig
+    - src/scanner.zig
+    - src/symbols.zig
+    - src/vcs.zig
+---
+
 # Design
 
 ## Problem
@@ -66,7 +76,7 @@ Resolution uses tree-sitter `.scm` queries per language. A simple query finds na
 
 Filter captures where `@name` matches the target symbol. Extract `@definition` node text. Hash it.
 
-If the symbol is not found, the binding is reported as **broken** — the spec references something that doesn't exist anymore.
+If the symbol is not found, the binding is reported as STALE with reason "symbol not found".
 
 ### Dependencies
 
@@ -107,17 +117,23 @@ docs/auth.md
 
 This is a free byproduct of the VCS query — `git log` gives author and message.
 
-### Broken Bindings
+### Missing Bindings
 
-If a symbol binding can't be resolved (symbol not found in file), it's reported as broken:
+If a file binding can't be resolved (file doesn't exist), it's reported as STALE with reason "file not found":
 
 ```
 docs/auth.md
-  BROKEN  src/auth/provider.ts#AuthConfig
-          symbol AuthConfig not found
+  STALE   src/core/old-module.ts
+          file not found
 ```
 
-If a file binding can't be resolved (file doesn't exist), same treatment.
+If a symbol binding can't be resolved (symbol not found in file), it's reported as STALE with reason "symbol not found":
+
+```
+docs/auth.md
+  STALE   src/auth/provider.ts#AuthConfig
+          symbol not found
+```
 
 ## Architecture
 
@@ -128,32 +144,35 @@ If a file binding can't be resolved (file doesn't exist), same treatment.
                            │
               ┌────────────┼────────────┐
               ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌─────────┐
-        │  Scanner  │ │ Resolver │ │   VCS   │
-        │           │ │          │ │         │
-        │ find spec │ │ parse    │ │ git log │
-        │ files,    │ │ bound    │ │ jj log  │
-        │ extract   │ │ files,   │ │ blame   │
-        │ bindings  │ │ hash     │ │         │
-        │           │ │ symbols  │ │         │
-        └──────────┘ └──────────┘ └─────────┘
+        ┌────────────┐ ┌──────────┐ ┌─────────┐
+        │ scanner.zig│ │symbols.zig│ │ vcs.zig │
+        │            │ │          │ │         │
+        │ find spec  │ │ parse    │ │ git log │
+        │ files,     │ │ bound    │ │ jj log  │
+        │ extract    │ │ files,   │ │ blame   │
+        │ bindings   │ │ hash     │ │         │
+        │            │ │ symbols  │ │         │
+        └────────────┘ └──────────┘ └─────────┘
               │            │            │
               │       tree-sitter       │
               │       (on demand)       │
               └────────────┬────────────┘
                            ▼
                     ┌─────────────┐
-                    │   Report    │
-                    │  ok/stale/  │
-                    │   broken    │
+                    │   main.zig  │
+                    │  ok / stale │
                     └─────────────┘
 ```
 
-### Scanner
+Additional modules:
+- `frontmatter.zig` — YAML frontmatter parsing and editing
+- `main.zig` — CLI entry point, command dispatch, report formatting
+
+### scanner.zig
 
 Walks the repo looking for markdown files with `drift:` frontmatter. Parses frontmatter to extract explicit bindings. Parses content to extract implicit bindings (`@` references). No index — scans on every run. Performance is bounded by the number of markdown files, not the size of the codebase.
 
-### Resolver
+### symbols.zig
 
 For each binding, resolves the current state:
 
@@ -162,7 +181,7 @@ For each binding, resolves the current state:
 
 Parsing is on-demand. Only files that are actually bound get parsed. A lint run that checks 10 specs binding to 30 symbols across 20 files does 20 tree-sitter parses — milliseconds.
 
-### VCS
+### vcs.zig
 
 Shells out to git or jj. Auto-detected from `.jj` (preferred) or `.git` directory. Operations:
 

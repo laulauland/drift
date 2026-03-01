@@ -15,7 +15,7 @@
 
 drift binds markdown specs to code and lints for staleness. No daemon, no index, no cache. Every `drift lint` run is stateless: read specs, parse referenced files on demand, hash symbols, query VCS, report.
 
-Reference: docs/DESIGN.md, docs/DECISIONS.md, docs/CLI.md
+Reference: docs/DESIGN.md, docs/DECISIONS.md, docs/CLI.md, docs/RELEASING.md
 
 ## Zig Conventions
 

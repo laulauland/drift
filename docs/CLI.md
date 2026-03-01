@@ -1,62 +1,41 @@
+---
+drift:
+  files:
+    - src/main.zig
+---
+
 # CLI Reference
 
 All commands support `--format json` for tool integration.
 
-## drift init
-
-Create a `.drift/config.yaml` in the current directory.
-
-```
-drift init
-```
-
-If `.drift/config.yaml` already exists, exits with an error.
-
-Creates a minimal config:
-
-```yaml
-scan:
-  include:
-    - "**/*.md"
-  exclude:
-    - "node_modules/**"
-    - "vendor/**"
-    - ".git/**"
-    - ".jj/**"
-vcs: auto
-```
-
 ## drift lint
 
-Check all specs for staleness. The primary command.
+Check all specs for staleness. The primary command. Exits 1 if any binding is stale.
 
 ```
-drift lint [--exit-code] [--format json]
+drift lint [--format json]
 ```
 
-Scans the repo for markdown files with `drift:` frontmatter. For each spec, checks if any bound file was modified after the spec. Reports stale and broken bindings with blame.
+Scans the repo for markdown files with `drift:` frontmatter. For each spec, checks if any bound file was modified after the spec. Reports stale bindings with reasons.
 
 ```
 $ drift lint
 
 docs/auth.md
   STALE   src/auth/provider.ts#AuthConfig
-          changed by mike in e4f8a2c (Mar 15)
-          "refactor: split auth config into separate concerns"
+          changed after spec
   STALE   src/auth/login.ts
-          changed by mike in e4f8a2c (Mar 15)
+          changed after spec
 
 docs/payments.md
   ok
 
 docs/project.md
-  BROKEN  src/core/old-module.ts
+  STALE   src/core/old-module.ts
           file not found
 
-2 specs stale, 1 broken, 1 ok
+2 specs stale, 1 ok
 ```
-
-`--exit-code`: exit 1 if any spec is stale or broken. Use in CI or pre-commit hooks.
 
 ## drift status
 
@@ -74,8 +53,6 @@ docs/auth.md (3 bindings)
     - src/auth/provider.ts#AuthConfig@qpvuntsm
     - src/auth/login.ts@qpvuntsm
     - src/auth/session.ts
-  depends:
-    - docs/project.md
 
 docs/payments.md (1 binding)
   files:
@@ -86,7 +63,7 @@ docs/project.md (0 bindings)
 
 ## drift link
 
-Add a binding to a spec's frontmatter. The argument format encodes both the file path and optional provenance.
+Add a binding to a spec's frontmatter. When no `@change` suffix is provided, drift auto-appends the current HEAD (git) or current change ID (jj) as provenance.
 
 ```
 drift link <spec-path> <file[@change]>
@@ -97,7 +74,7 @@ Edits the spec file's YAML frontmatter directly.
 
 ```
 $ drift link docs/auth.md src/auth/session.ts
-added src/auth/session.ts to docs/auth.md
+added src/auth/session.ts@qpvuntsm to docs/auth.md
 
 $ drift link docs/auth.md src/auth/session.ts@qpvuntsm
 added src/auth/session.ts@qpvuntsm to docs/auth.md
