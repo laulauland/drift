@@ -88,6 +88,51 @@ pub fn checkStaleness(
     return trimmed.len > 0;
 }
 
+/// Get file content at a specific revision. Returns null if the file didn't exist at that revision.
+/// Caller owns returned memory.
+pub fn getFileAtRevision(
+    allocator: std.mem.Allocator,
+    cwd_path: []const u8,
+    revision: []const u8,
+    file_path: []const u8,
+    vcs_kind: VcsKind,
+) !?[]const u8 {
+    const rev_path = switch (vcs_kind) {
+        .git => try std.fmt.allocPrint(allocator, "{s}:{s}", .{ revision, file_path }),
+        .jj => null,
+    };
+    defer if (rev_path) |rp| allocator.free(rp);
+
+    const argv: []const []const u8 = switch (vcs_kind) {
+        .git => &.{ "git", "show", rev_path.? },
+        .jj => &.{ "jj", "file", "show", "-r", revision, file_path },
+    };
+
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = argv,
+        .cwd = cwd_path,
+        .max_output_bytes = 1024 * 1024,
+    }) catch return null;
+    defer allocator.free(result.stderr);
+
+    // Non-zero exit means the file didn't exist at that revision
+    switch (result.term) {
+        .Exited => |code| {
+            if (code != 0) {
+                allocator.free(result.stdout);
+                return null;
+            }
+        },
+        else => {
+            allocator.free(result.stdout);
+            return null;
+        },
+    }
+
+    return result.stdout;
+}
+
 /// Get the current change/commit ID (short form) for auto-provenance.
 pub fn getCurrentChangeId(allocator: std.mem.Allocator, cwd_path: []const u8, vcs: VcsKind) !?[]const u8 {
     const result = switch (vcs) {

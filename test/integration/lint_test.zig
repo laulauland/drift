@@ -136,6 +136,59 @@ test "lint detects inline bindings from content" {
     try helpers.expectContains(output, "src/helper.ts");
 }
 
+test "lint ok when provenance content matches current file" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile("src/main.ts", "export function main() {}\n");
+    try repo.commit("add source");
+
+    // Get the current commit hash for provenance
+    const rev = try repo.getHeadRevision(allocator);
+    defer allocator.free(rev);
+
+    // Create spec with binding pointing to that revision
+    const binding = try std.fmt.allocPrint(allocator, "src/main.ts@{s}", .{rev});
+    defer allocator.free(binding);
+    try repo.writeSpec("docs/spec.md", &.{binding}, "# Spec\n");
+    try repo.commit("add spec");
+
+    const result = try repo.runDrift(&.{"lint"});
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 0);
+    try helpers.expectContains(result.stdout, "ok");
+}
+
+test "lint stale when provenance content differs" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile("src/main.ts", "export function main() {}\n");
+    try repo.commit("add source");
+
+    const rev = try repo.getHeadRevision(allocator);
+    defer allocator.free(rev);
+
+    try repo.writeFile("src/main.ts", "export function main() { return 42; }\n");
+    try repo.commit("modify source");
+
+    const binding = try std.fmt.allocPrint(allocator, "src/main.ts@{s}", .{rev});
+    defer allocator.free(binding);
+    try repo.writeSpec("docs/spec.md", &.{binding}, "# Spec\n");
+    try repo.commit("add spec");
+
+    const result = try repo.runDrift(&.{"lint"});
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 1);
+    const output = if (result.stdout.len > 0) result.stdout else result.stderr;
+    try helpers.expectContains(output, "STALE");
+    try helpers.expectContains(output, "changed after spec");
+}
+
 test "lint reports stale for missing symbol binding" {
     const allocator = std.testing.allocator;
     var repo = try helpers.TempRepo.init(allocator);

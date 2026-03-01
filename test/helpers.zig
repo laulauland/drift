@@ -115,6 +115,19 @@ pub const TempRepo = struct {
         return runProcess(self.allocator, argv, self.abs_path);
     }
 
+    /// Get the short commit hash of HEAD. Caller owns returned memory.
+    pub fn getHeadRevision(self: *TempRepo, allocator: std.mem.Allocator) ![]const u8 {
+        const result = try runProcess(allocator, &.{ "git", "rev-parse", "--short", "HEAD" }, self.abs_path);
+        defer allocator.free(result.stderr);
+        const stdout = result.stdout;
+        if (stdout.len > 0 and stdout[stdout.len - 1] == '\n') {
+            const trimmed = try allocator.dupe(u8, stdout[0 .. stdout.len - 1]);
+            allocator.free(stdout);
+            return trimmed;
+        }
+        return stdout;
+    }
+
     /// Read a file from the temp repo. Caller owns the returned memory.
     pub fn readFile(self: *TempRepo, path: []const u8) ![]const u8 {
         return self.tmp.dir.readFileAlloc(self.allocator, path, 1024 * 1024);

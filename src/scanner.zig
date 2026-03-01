@@ -124,6 +124,81 @@ pub fn parseInlineBindings(allocator: std.mem.Allocator, content: []const u8) st
     return bindings;
 }
 
+/// Update inline `@./` references with a new provenance change ID.
+/// If `target_file` is non-null, only update refs whose file identity matches.
+/// If null, update all inline refs. Returns the full updated content.
+pub fn updateInlineBindings(
+    allocator: std.mem.Allocator,
+    content: []const u8,
+    target_file: ?[]const u8,
+    change_id: []const u8,
+) ![]const u8 {
+    var output: std.ArrayList(u8) = .{};
+    defer output.deinit(allocator);
+    const writer = output.writer(allocator);
+
+    var pos: usize = 0;
+    while (pos < content.len) {
+        if (std.mem.indexOf(u8, content[pos..], "@./")) |offset| {
+            const ref_start = pos + offset; // position of '@' in "@./"
+            const path_start = ref_start + 3; // skip "@./"
+
+            // Find end of reference: next whitespace or end of content
+            var path_end = path_start;
+            while (path_end < content.len and !isPathTerminator(content[path_end])) {
+                path_end += 1;
+            }
+
+            // Strip trailing punctuation
+            var ref_end = path_end;
+            while (ref_end > path_start and isTrailingPunctuation(content[ref_end - 1])) {
+                ref_end -= 1;
+            }
+
+            if (ref_end > path_start) {
+                const ref_path = content[path_start..ref_end]; // path after "@./"
+
+                // Get file identity (strips @provenance)
+                const ref_identity = frontmatter.bindingFileIdentity(ref_path);
+
+                // Get file path portion (strips #symbol) for matching
+                const ref_hash_pos = std.mem.indexOfScalar(u8, ref_identity, '#');
+                const ref_file_path = if (ref_hash_pos) |hp| ref_identity[0..hp] else ref_identity;
+
+                // Check if we should update this ref
+                const should_update = if (target_file) |tf|
+                    std.mem.eql(u8, ref_file_path, tf)
+                else
+                    true;
+
+                if (should_update) {
+                    // Write everything before this reference
+                    try writer.writeAll(content[pos..ref_start]);
+                    // Write updated reference: @./identity@change_id
+                    try writer.writeAll("@./");
+                    try writer.writeAll(ref_identity);
+                    try writer.writeByte('@');
+                    try writer.writeAll(change_id);
+                    // Write any trailing punctuation that was stripped
+                    try writer.writeAll(content[ref_end..path_end]);
+                    pos = path_end;
+                    continue;
+                }
+            }
+
+            // Not updating this ref, copy it as-is
+            try writer.writeAll(content[pos..path_end]);
+            pos = path_end;
+        } else {
+            // No more @./ references, copy the rest
+            try writer.writeAll(content[pos..]);
+            break;
+        }
+    }
+
+    return try allocator.dupe(u8, output.items);
+}
+
 pub fn isPathTerminator(c: u8) bool {
     return c == ' ' or c == '\t' or c == '\n' or c == '\r';
 }

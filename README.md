@@ -12,13 +12,42 @@ Any markdown file in your repo can declare bindings to code — specific files o
 
 ## Install
 
+```bash
+brew install laulauland/tap/drift
 ```
-zig build -Doptimize=ReleaseSafe
+
+Or build from source:
+
+```bash
+zig build -Doptimize=ReleaseSafe --prefix ~/.local
 ```
 
 ## Usage
 
-Mark any markdown file as a drift spec by adding frontmatter:
+Write a markdown spec, then bind it to code:
+
+```
+drift link docs/auth.md src/auth/login.ts
+drift link docs/auth.md src/auth/provider.ts#AuthConfig
+```
+
+`drift link` adds the binding to the spec's YAML frontmatter and auto-appends provenance (current git HEAD or jj change ID). You can also reference code inline — `@./src/auth/provider.ts#AuthConfig` in the spec body — and `drift link` will stamp those with provenance too.
+
+Check if specs are fresh:
+
+```
+drift lint
+```
+
+Refresh all bindings in a spec after updating it:
+
+```
+drift link docs/auth.md
+```
+
+### What a spec looks like
+
+After linking, your spec has frontmatter bindings and (optionally) inline references:
 
 ```markdown
 ---
@@ -30,28 +59,10 @@ drift:
 
 # Auth Architecture
 
-Users authenticate via OAuth2. The token validation flow uses @./src/auth/provider.ts#AuthConfig@qpvuntsm ...
+Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@qpvuntsm ...
 ```
 
-Bindings come from two sources:
-- **Explicit**: listed in `drift.files` frontmatter
-- **Implicit**: `@./path` and `@./path#Symbol` references in content
-
-Each binding can carry provenance via an `@change` suffix (e.g. `src/auth/login.ts@qpvuntsm`). The suffix is optional -- bare paths work without it. Provenance is per-binding, so different files can track different changes.
-
-Check if specs are fresh:
-
-```
-drift lint
-```
-
-Link a binding with provenance:
-
-```
-drift link docs/auth.md src/auth/session.ts
-```
-
-When running `drift link` without a `@change` suffix, drift auto-appends the current HEAD (git) or current change ID (jj) as provenance.
+Each binding carries provenance via an `@change` suffix — a snapshot of which VCS change you last reviewed that file at. Provenance is per-binding, so different files track independently.
 
 ## Commands
 
@@ -64,9 +75,9 @@ drift unlink        Remove a binding from a spec
 
 ## How staleness works
 
-For each spec, drift finds the last VCS commit that modified the spec file. Then it checks if any bound file was modified in a later commit. If so, the spec is stale.
+For each binding with provenance, drift compares the file's content at the provenance revision against its current content. If they differ, the spec is stale. This is content-based — git rebases that don't change content won't trigger false positives, and jj rewrites that do change content won't slip through.
 
-For symbol-level bindings (`#AuthConfig`), drift parses the bound file with tree-sitter and hashes just the symbol's content. The spec is stale only if that specific symbol changed — not the whole file.
+For symbol-level bindings (`#AuthConfig`), drift parses the file with tree-sitter and compares just the symbol's AST node. Changes elsewhere in the file don't trigger staleness.
 
 Staleness is reported with a reason:
 
@@ -89,6 +100,27 @@ Reasons include:
 - **changed after spec** — the bound file (or symbol) was modified after the spec
 - **file not found** — the bound file no longer exists
 - **symbol not found** — the bound symbol no longer exists in the file
+
+## CI
+
+`drift lint` exits 1 when any spec is stale, so it works as a CI gate:
+
+```yaml
+# .github/workflows/drift.yml
+name: Drift
+on: [push, pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: laulauland/drift/.github/actions/setup@main
+      - run: drift lint
+```
+
+`fetch-depth: 0` is required — drift needs VCS history to compare content at provenance revisions. The setup action auto-detects platform and downloads the right binary from GitHub releases.
 
 ## VCS support
 

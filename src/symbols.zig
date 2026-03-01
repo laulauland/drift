@@ -133,6 +133,56 @@ pub fn languageForExtension(ext: []const u8) ?LanguageQuery {
     return null;
 }
 
+/// Extract the byte range [start, end] of the definition node for the target symbol.
+/// Returns null if the symbol is not found. The caller can slice source[start..end] to get the content.
+pub fn extractSymbolContent(
+    source: []const u8,
+    lang_query: LanguageQuery,
+    target_symbol: []const u8,
+) ?[2]u32 {
+    const parser = ts.Parser.create();
+    defer parser.destroy();
+
+    parser.setLanguage(lang_query.language) catch return null;
+
+    const tree = parser.parseString(source, null) orelse return null;
+    defer tree.destroy();
+
+    var error_offset: u32 = 0;
+    const query = ts.Query.create(lang_query.language, lang_query.query_source, &error_offset) catch return null;
+    defer query.destroy();
+
+    const cursor = ts.QueryCursor.create();
+    defer cursor.destroy();
+
+    cursor.exec(query, tree.rootNode());
+
+    while (cursor.nextMatch()) |match| {
+        var name_matches = false;
+        var def_start: u32 = 0;
+        var def_end: u32 = 0;
+
+        for (match.captures) |capture| {
+            const capture_name = query.captureNameForId(capture.index) orelse continue;
+            if (std.mem.eql(u8, capture_name, "name")) {
+                const node_text = source[capture.node.startByte()..capture.node.endByte()];
+                if (std.mem.eql(u8, node_text, target_symbol)) {
+                    name_matches = true;
+                }
+            } else if (std.mem.eql(u8, capture_name, "definition")) {
+                def_start = capture.node.startByte();
+                def_end = capture.node.endByte();
+            }
+        }
+
+        if (name_matches and def_end > def_start) {
+            return .{ def_start, def_end };
+        }
+    }
+
+    return null;
+}
+
 /// Check if a named symbol exists in the given source file using tree-sitter.
 /// Returns true if the symbol is found, false otherwise.
 pub fn resolveSymbolWithTreeSitter(source: []const u8, lang_query: LanguageQuery, target_symbol: []const u8) bool {

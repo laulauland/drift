@@ -1,0 +1,48 @@
+name: Setup Drift
+description: Install the drift CLI for spec-to-code staleness checking
+inputs:
+  version:
+    description: Release tag to install (e.g. "nightly-42"). Defaults to latest.
+    required: false
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    - name: Detect platform
+      id: platform
+      shell: bash
+      run: |
+        case "$(uname -s)-$(uname -m)" in
+          Linux-x86_64)  echo "target=x86_64-linux" >> "$GITHUB_OUTPUT" ;;
+          Linux-aarch64)  echo "target=aarch64-linux" >> "$GITHUB_OUTPUT" ;;
+          Darwin-x86_64)  echo "target=x86_64-macos" >> "$GITHUB_OUTPUT" ;;
+          Darwin-arm64)   echo "target=aarch64-macos" >> "$GITHUB_OUTPUT" ;;
+          *) echo "::error::Unsupported platform: $(uname -s)-$(uname -m)"; exit 1 ;;
+        esac
+
+    - name: Resolve version
+      id: version
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          TAG="$(curl -fsSL -H 'Accept: application/json' \
+            https://github.com/laulauland/drift/releases/latest \
+            | sed -n 's/.*"tag_name":"\([^"]*\)".*/\1/p')"
+          if [ -z "$TAG" ]; then
+            echo "::error::Could not resolve latest drift release"
+            exit 1
+          fi
+        else
+          TAG="${{ inputs.version }}"
+        fi
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+    - name: Download and install
+      shell: bash
+      run: |
+        URL="https://github.com/laulauland/drift/releases/download/${{ steps.version.outputs.tag }}/drift-${{ steps.platform.outputs.target }}.tar.gz"
+        curl -fsSL "$URL" | tar xz -C /usr/local/bin
+        chmod +x /usr/local/bin/drift
+        drift --help > /dev/null 2>&1 || true
+        echo "Installed drift ${{ steps.version.outputs.tag }} (${{ steps.platform.outputs.target }})"

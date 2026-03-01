@@ -155,6 +155,66 @@ pub fn linkBinding(allocator: std.mem.Allocator, content: []const u8, binding: [
     return try allocator.dupe(u8, output.items);
 }
 
+/// Update all bindings in frontmatter with a new provenance change ID.
+/// Returns the full updated content.
+pub fn relinkAllBindings(
+    allocator: std.mem.Allocator,
+    content: []const u8,
+    change_id: []const u8,
+) ![]const u8 {
+    if (!std.mem.startsWith(u8, content, "---\n")) {
+        return try allocator.dupe(u8, content);
+    }
+
+    const after_open = content[4..];
+    const close_offset = std.mem.indexOf(u8, after_open, "\n---\n") orelse {
+        return try allocator.dupe(u8, content);
+    };
+
+    const fm = after_open[0..close_offset];
+    const body_start = 4 + close_offset + 5;
+
+    var output: std.ArrayList(u8) = .{};
+    defer output.deinit(allocator);
+    const writer = output.writer(allocator);
+
+    try writer.writeAll("---\n");
+
+    var in_files_section = false;
+    var lines_iter = std.mem.splitScalar(u8, fm, '\n');
+
+    while (lines_iter.next()) |line| {
+        if (std.mem.startsWith(u8, line, "  files:")) {
+            in_files_section = true;
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            continue;
+        }
+
+        if (in_files_section and std.mem.startsWith(u8, line, "    - ")) {
+            const existing_binding = line["    - ".len..];
+            const identity = bindingFileIdentity(existing_binding);
+            try writer.print("    - {s}@{s}\n", .{ identity, change_id });
+            continue;
+        }
+
+        if (in_files_section and !std.mem.startsWith(u8, line, "    - ")) {
+            in_files_section = false;
+        }
+
+        try writer.writeAll(line);
+        try writer.writeByte('\n');
+    }
+
+    try writer.writeAll("---\n");
+
+    if (body_start <= content.len) {
+        try writer.writeAll(content[body_start..]);
+    }
+
+    return try allocator.dupe(u8, output.items);
+}
+
 pub const UnlinkResult = struct {
     content: []const u8,
     removed: bool,
