@@ -10,20 +10,58 @@ pub fn bindingFileIdentity(binding: []const u8) []const u8 {
 }
 
 /// Parse drift frontmatter from file content. Returns bindings list if this is a drift spec, null otherwise.
+/// Checks both YAML frontmatter and HTML comment-based bindings, merging results.
 pub fn parseDriftSpec(allocator: std.mem.Allocator, content: []const u8) ?std.ArrayList([]const u8) {
+    var bindings: std.ArrayList([]const u8) = .{};
+    var found_source = false;
+
+    // 1. Parse YAML frontmatter bindings
+    if (parseFrontmatterBindings(allocator, content)) |fm_result| {
+        var fm_bindings = fm_result;
+        found_source = true;
+        for (fm_bindings.items) |b| {
+            bindings.append(allocator, b) catch {
+                allocator.free(b);
+            };
+        }
+        fm_bindings.deinit(allocator);
+    }
+
+    // 2. Parse HTML comment-based bindings
+    if (parseCommentBindings(allocator, content)) |comment_result| {
+        var comment_bindings = comment_result;
+        found_source = true;
+        for (comment_bindings.items) |b| {
+            bindings.append(allocator, b) catch {
+                allocator.free(b);
+            };
+        }
+        comment_bindings.deinit(allocator);
+    }
+
+    if (!found_source) {
+        for (bindings.items) |b| allocator.free(b);
+        bindings.deinit(allocator);
+        return null;
+    }
+
+    return bindings;
+}
+
+/// Parse bindings from YAML frontmatter (--- ... --- block).
+fn parseFrontmatterBindings(allocator: std.mem.Allocator, content: []const u8) ?std.ArrayList([]const u8) {
     if (!std.mem.startsWith(u8, content, "---\n")) return null;
 
     const after_open = content[4..];
     const close_offset = std.mem.indexOf(u8, after_open, "\n---\n") orelse
         std.mem.indexOf(u8, after_open, "\n---") orelse return null;
-    const frontmatter = after_open[0..close_offset];
+    const fm = after_open[0..close_offset];
 
-    // Check for "drift:" line
     var has_drift = false;
     var in_files_section = false;
     var bindings: std.ArrayList([]const u8) = .{};
 
-    var lines_iter = std.mem.splitScalar(u8, frontmatter, '\n');
+    var lines_iter = std.mem.splitScalar(u8, fm, '\n');
     while (lines_iter.next()) |line| {
         if (std.mem.eql(u8, line, "drift:") or std.mem.startsWith(u8, line, "drift:")) {
             has_drift = true;
@@ -45,7 +83,6 @@ pub fn parseDriftSpec(allocator: std.mem.Allocator, content: []const u8) ?std.Ar
             continue;
         }
 
-        // Non-list-item line ends the files section
         if (in_files_section and !std.mem.startsWith(u8, line, "    - ")) {
             in_files_section = false;
         }
@@ -58,6 +95,217 @@ pub fn parseDriftSpec(allocator: std.mem.Allocator, content: []const u8) ?std.Ar
     }
 
     return bindings;
+}
+
+/// Parse bindings from `<!-- drift: ... -->` HTML comment blocks.
+/// Returns null if no comment-based bindings are found.
+fn parseCommentBindings(allocator: std.mem.Allocator, content: []const u8) ?std.ArrayList([]const u8) {
+    const marker = "<!-- drift:";
+    var bindings: std.ArrayList([]const u8) = .{};
+    var found = false;
+
+    var pos: usize = 0;
+    while (pos < content.len) {
+        const marker_offset = std.mem.indexOf(u8, content[pos..], marker) orelse break;
+        const block_start = pos + marker_offset + marker.len;
+
+        const close_offset = std.mem.indexOf(u8, content[block_start..], "-->") orelse break;
+        const block_content = content[block_start .. block_start + close_offset];
+
+        // Parse lines inside the comment block using the same YAML-like format
+        var in_files_section = false;
+        var lines_iter = std.mem.splitScalar(u8, block_content, '\n');
+        while (lines_iter.next()) |line| {
+            const trimmed = std.mem.trimLeft(u8, line, " \t");
+
+            if (std.mem.startsWith(u8, trimmed, "files:")) {
+                in_files_section = true;
+                continue;
+            }
+
+            if (in_files_section and std.mem.startsWith(u8, trimmed, "- ")) {
+                const binding_text = trimmed["- ".len..];
+                if (binding_text.len > 0) {
+                    const duped = allocator.dupe(u8, binding_text) catch continue;
+                    bindings.append(allocator, duped) catch {
+                        allocator.free(duped);
+                        continue;
+                    };
+                    found = true;
+                }
+                continue;
+            }
+
+            // Non-empty, non-list line ends files section
+            if (in_files_section and trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "- ")) {
+                in_files_section = false;
+            }
+        }
+
+        pos = block_start + close_offset + 3; // skip past "-->"
+    }
+
+    if (!found) {
+        for (bindings.items) |b| allocator.free(b);
+        bindings.deinit(allocator);
+        return null;
+    }
+
+    return bindings;
+}
+
+/// Check if content has a `<!-- drift: ... -->` comment block.
+fn hasCommentBindings(content: []const u8) bool {
+    return std.mem.indexOf(u8, content, "<!-- drift:") != null;
+}
+
+/// Add or update a binding inside a `<!-- drift: ... -->` comment block.
+fn linkCommentBinding(allocator: std.mem.Allocator, content: []const u8, binding: []const u8) ![]const u8 {
+    const new_identity = bindingFileIdentity(binding);
+    const marker = "<!-- drift:";
+
+    const marker_pos = std.mem.indexOf(u8, content, marker) orelse {
+        return try allocator.dupe(u8, content);
+    };
+    const block_start = marker_pos + marker.len;
+    const close_offset = std.mem.indexOf(u8, content[block_start..], "-->") orelse {
+        return try allocator.dupe(u8, content);
+    };
+    const block_content = content[block_start .. block_start + close_offset];
+    const block_end = block_start + close_offset; // position of "-->"
+
+    var output: std.ArrayList(u8) = .{};
+    defer output.deinit(allocator);
+    const writer = output.writer(allocator);
+
+    // Write everything before the comment block content
+    try writer.writeAll(content[0..block_start]);
+
+    // Rewrite the comment block content with the binding added/updated
+    var found_existing = false;
+    var in_files_section = false;
+    var wrote_binding = false;
+    var lines_iter = std.mem.splitScalar(u8, block_content, '\n');
+
+    while (lines_iter.next()) |line| {
+        const trimmed = std.mem.trimLeft(u8, line, " \t");
+
+        if (std.mem.startsWith(u8, trimmed, "files:")) {
+            in_files_section = true;
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            continue;
+        }
+
+        if (in_files_section and std.mem.startsWith(u8, trimmed, "- ")) {
+            const existing_binding = trimmed["- ".len..];
+            const existing_identity = bindingFileIdentity(existing_binding);
+
+            if (std.mem.eql(u8, existing_identity, new_identity)) {
+                try writer.writeAll("    - ");
+                try writer.writeAll(binding);
+                try writer.writeByte('\n');
+                found_existing = true;
+                wrote_binding = true;
+                continue;
+            }
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            continue;
+        }
+
+        if (in_files_section and trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "- ")) {
+            if (!found_existing and !wrote_binding) {
+                try writer.writeAll("    - ");
+                try writer.writeAll(binding);
+                try writer.writeByte('\n');
+                wrote_binding = true;
+            }
+            in_files_section = false;
+        }
+
+        try writer.writeAll(line);
+        try writer.writeByte('\n');
+    }
+
+    // If still in files section at end, append
+    if (!wrote_binding) {
+        try writer.writeAll("    - ");
+        try writer.writeAll(binding);
+        try writer.writeByte('\n');
+    }
+
+    // Write the closing --> and everything after
+    try writer.writeAll(content[block_end..]);
+
+    return try allocator.dupe(u8, output.items);
+}
+
+/// Update all bindings in `<!-- drift: ... -->` comment blocks with a new provenance change ID.
+fn relinkCommentBindings(allocator: std.mem.Allocator, content: []const u8, change_id: []const u8) ![]const u8 {
+    const marker = "<!-- drift:";
+
+    var output: std.ArrayList(u8) = .{};
+    defer output.deinit(allocator);
+    const writer = output.writer(allocator);
+
+    var pos: usize = 0;
+    while (pos < content.len) {
+        const marker_offset = std.mem.indexOf(u8, content[pos..], marker) orelse {
+            try writer.writeAll(content[pos..]);
+            break;
+        };
+        const abs_marker_pos = pos + marker_offset;
+        const block_start = abs_marker_pos + marker.len;
+
+        const close_offset = std.mem.indexOf(u8, content[block_start..], "-->") orelse {
+            try writer.writeAll(content[pos..]);
+            break;
+        };
+        const block_content = content[block_start .. block_start + close_offset];
+        const block_end = block_start + close_offset;
+
+        // Write everything before the comment block content
+        try writer.writeAll(content[pos..block_start]);
+
+        // Rewrite the comment block content with updated provenance
+        var in_files_section = false;
+        var lines_iter = std.mem.splitScalar(u8, block_content, '\n');
+
+        while (lines_iter.next()) |line| {
+            const trimmed = std.mem.trimLeft(u8, line, " \t");
+
+            if (std.mem.startsWith(u8, trimmed, "files:")) {
+                in_files_section = true;
+                try writer.writeAll(line);
+                try writer.writeByte('\n');
+                continue;
+            }
+
+            if (in_files_section and std.mem.startsWith(u8, trimmed, "- ")) {
+                const existing_binding = trimmed["- ".len..];
+                const identity = bindingFileIdentity(existing_binding);
+                try writer.writeAll("    - ");
+                try writer.writeAll(identity);
+                try writer.writeByte('@');
+                try writer.writeAll(change_id);
+                try writer.writeByte('\n');
+                continue;
+            }
+
+            if (in_files_section and trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "- ")) {
+                in_files_section = false;
+            }
+
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+        }
+
+        // Continue after the closing -->
+        pos = block_end;
+    }
+
+    return try allocator.dupe(u8, output.items);
 }
 
 /// Core logic: given file content and a binding, produce new file content with the binding added/updated.
@@ -140,7 +388,12 @@ pub fn linkBinding(allocator: std.mem.Allocator, content: []const u8, binding: [
         }
     }
 
-    // No frontmatter found: prepend a complete frontmatter block
+    // No YAML frontmatter: check for comment-based bindings
+    if (hasCommentBindings(content)) {
+        return try linkCommentBinding(allocator, content, binding);
+    }
+
+    // No frontmatter and no comment block: prepend a complete frontmatter block
     var output: std.ArrayList(u8) = .{};
     defer output.deinit(allocator);
     const writer = output.writer(allocator);
@@ -155,64 +408,76 @@ pub fn linkBinding(allocator: std.mem.Allocator, content: []const u8, binding: [
     return try allocator.dupe(u8, output.items);
 }
 
-/// Update all bindings in frontmatter with a new provenance change ID.
+/// Update all bindings in frontmatter and comment blocks with a new provenance change ID.
 /// Returns the full updated content.
 pub fn relinkAllBindings(
     allocator: std.mem.Allocator,
     content: []const u8,
     change_id: []const u8,
 ) ![]const u8 {
-    if (!std.mem.startsWith(u8, content, "---\n")) {
-        return try allocator.dupe(u8, content);
-    }
+    // Step 1: Update frontmatter bindings
+    var intermediate: []const u8 = blk: {
+        if (!std.mem.startsWith(u8, content, "---\n")) {
+            break :blk try allocator.dupe(u8, content);
+        }
 
-    const after_open = content[4..];
-    const close_offset = std.mem.indexOf(u8, after_open, "\n---\n") orelse {
-        return try allocator.dupe(u8, content);
-    };
+        const after_open = content[4..];
+        const close_offset = std.mem.indexOf(u8, after_open, "\n---\n") orelse {
+            break :blk try allocator.dupe(u8, content);
+        };
 
-    const fm = after_open[0..close_offset];
-    const body_start = 4 + close_offset + 5;
+        const fm = after_open[0..close_offset];
+        const body_start = 4 + close_offset + 5;
 
-    var output: std.ArrayList(u8) = .{};
-    defer output.deinit(allocator);
-    const writer = output.writer(allocator);
+        var output: std.ArrayList(u8) = .{};
+        defer output.deinit(allocator);
+        const writer = output.writer(allocator);
 
-    try writer.writeAll("---\n");
+        try writer.writeAll("---\n");
 
-    var in_files_section = false;
-    var lines_iter = std.mem.splitScalar(u8, fm, '\n');
+        var in_files_section = false;
+        var lines_iter = std.mem.splitScalar(u8, fm, '\n');
 
-    while (lines_iter.next()) |line| {
-        if (std.mem.startsWith(u8, line, "  files:")) {
-            in_files_section = true;
+        while (lines_iter.next()) |line| {
+            if (std.mem.startsWith(u8, line, "  files:")) {
+                in_files_section = true;
+                try writer.writeAll(line);
+                try writer.writeByte('\n');
+                continue;
+            }
+
+            if (in_files_section and std.mem.startsWith(u8, line, "    - ")) {
+                const existing_binding = line["    - ".len..];
+                const identity = bindingFileIdentity(existing_binding);
+                try writer.print("    - {s}@{s}\n", .{ identity, change_id });
+                continue;
+            }
+
+            if (in_files_section and !std.mem.startsWith(u8, line, "    - ")) {
+                in_files_section = false;
+            }
+
             try writer.writeAll(line);
             try writer.writeByte('\n');
-            continue;
         }
 
-        if (in_files_section and std.mem.startsWith(u8, line, "    - ")) {
-            const existing_binding = line["    - ".len..];
-            const identity = bindingFileIdentity(existing_binding);
-            try writer.print("    - {s}@{s}\n", .{ identity, change_id });
-            continue;
+        try writer.writeAll("---\n");
+
+        if (body_start <= content.len) {
+            try writer.writeAll(content[body_start..]);
         }
 
-        if (in_files_section and !std.mem.startsWith(u8, line, "    - ")) {
-            in_files_section = false;
-        }
+        break :blk try allocator.dupe(u8, output.items);
+    };
 
-        try writer.writeAll(line);
-        try writer.writeByte('\n');
+    // Step 2: Update comment-based bindings
+    if (hasCommentBindings(intermediate)) {
+        const updated = try relinkCommentBindings(allocator, intermediate, change_id);
+        allocator.free(intermediate);
+        intermediate = updated;
     }
 
-    try writer.writeAll("---\n");
-
-    if (body_start <= content.len) {
-        try writer.writeAll(content[body_start..]);
-    }
-
-    return try allocator.dupe(u8, output.items);
+    return intermediate;
 }
 
 pub const UnlinkResult = struct {
@@ -354,4 +619,76 @@ test "linkBinding adds frontmatter to plain markdown" {
     try std.testing.expect(std.mem.indexOf(u8, result, "drift:") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "src/target.ts") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "# Just a plain markdown file") != null);
+}
+
+// --- unit tests for comment-based bindings ---
+
+test "parseDriftSpec parses comment-based bindings" {
+    const allocator = std.testing.allocator;
+    const content = "# My Doc\n\n<!-- drift:\n  files:\n    - src/main.zig\n    - src/vcs.zig\n-->\n\nSome content.\n";
+    const bindings = parseDriftSpec(allocator, content) orelse {
+        return error.TestUnexpectedResult;
+    };
+    defer {
+        for (bindings.items) |b| allocator.free(b);
+        bindings.deinit(allocator);
+    }
+    try std.testing.expectEqual(@as(usize, 2), bindings.items.len);
+    try std.testing.expectEqualStrings("src/main.zig", bindings.items[0]);
+    try std.testing.expectEqualStrings("src/vcs.zig", bindings.items[1]);
+}
+
+test "parseDriftSpec merges frontmatter and comment bindings" {
+    const allocator = std.testing.allocator;
+    const content = "---\ndrift:\n  files:\n    - src/a.ts\n---\n\n<!-- drift:\n  files:\n    - src/b.ts\n-->\n";
+    const bindings = parseDriftSpec(allocator, content) orelse {
+        return error.TestUnexpectedResult;
+    };
+    defer {
+        for (bindings.items) |b| allocator.free(b);
+        bindings.deinit(allocator);
+    }
+    try std.testing.expectEqual(@as(usize, 2), bindings.items.len);
+}
+
+test "parseDriftSpec parses comment with provenance" {
+    const allocator = std.testing.allocator;
+    const content = "<!-- drift:\n  files:\n    - src/main.zig@abc123\n-->\n";
+    const bindings = parseDriftSpec(allocator, content) orelse {
+        return error.TestUnexpectedResult;
+    };
+    defer {
+        for (bindings.items) |b| allocator.free(b);
+        bindings.deinit(allocator);
+    }
+    try std.testing.expectEqual(@as(usize, 1), bindings.items.len);
+    try std.testing.expectEqualStrings("src/main.zig@abc123", bindings.items[0]);
+}
+
+test "linkBinding updates comment-based binding" {
+    const allocator = std.testing.allocator;
+    const content = "# Doc\n\n<!-- drift:\n  files:\n    - src/old.ts@abc\n-->\n\nBody.\n";
+    const result = try linkBinding(allocator, content, "src/old.ts@def");
+    defer allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/old.ts@def") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/old.ts@abc") == null);
+}
+
+test "linkBinding adds to comment-based binding" {
+    const allocator = std.testing.allocator;
+    const content = "# Doc\n\n<!-- drift:\n  files:\n    - src/existing.ts\n-->\n\nBody.\n";
+    const result = try linkBinding(allocator, content, "src/new.ts@abc");
+    defer allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/existing.ts") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/new.ts@abc") != null);
+}
+
+test "relinkAllBindings updates comment-based bindings" {
+    const allocator = std.testing.allocator;
+    const content = "# Doc\n\n<!-- drift:\n  files:\n    - src/main.zig@old\n    - src/vcs.zig\n-->\n\nBody.\n";
+    const result = try relinkAllBindings(allocator, content, "newchange");
+    defer allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/main.zig@newchange") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/vcs.zig@newchange") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "@old") == null);
 }

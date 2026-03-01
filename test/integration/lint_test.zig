@@ -189,6 +189,31 @@ test "lint stale when provenance content differs" {
     try helpers.expectContains(output, "changed after spec");
 }
 
+test "lint detects stale comment-based bindings" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile("src/main.ts", "export function main() {}\n");
+    try repo.commit("add source");
+
+    // Write spec with comment-based binding (no frontmatter)
+    try repo.writeFile("docs/spec.md", "# Spec\n\n<!-- drift:\n  files:\n    - src/main.ts\n-->\n\nSome docs.\n");
+    try repo.commit("add spec with comment binding");
+
+    // Modify the bound file
+    try repo.writeFile("src/main.ts", "export function main() { return 42; }\n");
+    try repo.commit("modify source");
+
+    const result = try repo.runDrift(&.{"lint"});
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 1);
+    const output = if (result.stdout.len > 0) result.stdout else result.stderr;
+    try helpers.expectContains(output, "STALE");
+    try helpers.expectContains(output, "src/main.ts");
+}
+
 test "lint reports stale for missing symbol binding" {
     const allocator = std.testing.allocator;
     var repo = try helpers.TempRepo.init(allocator);

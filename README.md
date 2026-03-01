@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: laulauland/drift/.github/actions/setup@main
+      - uses: laulauland/drift@main
       - run: drift lint
 ```
 

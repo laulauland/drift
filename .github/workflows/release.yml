@@ -154,9 +154,29 @@ jobs:
             echo "__RELEASE_BODY__"
           } >> "$GITHUB_OUTPUT"
 
+  lint:
+    name: Drift lint
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build drift
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Lint specs
+        run: ./zig-out/bin/drift lint
+
   build:
     name: Build (${{ matrix.target }})
-    needs: prepare
+    needs: [prepare, lint]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
