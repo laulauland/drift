@@ -21,6 +21,25 @@ Or build from source:
 zig build -Doptimize=ReleaseSafe --prefix ~/.local
 ```
 
+## Quickstart with Claude Code
+
+Install the CLI and the agent skill:
+
+```bash
+brew install laulauland/tap/drift
+npx skills add laulauland/drift
+```
+
+The skill teaches Claude Code how to maintain drift bindings — when to link, when to update specs, and how to handle stale bindings. Once installed, you can tell Claude to add drift to your existing docs:
+
+> "Add drift bindings to docs/auth.md for src/auth/login.ts and src/auth/provider.ts#AuthConfig"
+
+> "Run drift lint and fix any stale specs"
+
+> "Write a spec for the payment module and bind it to the relevant source files"
+
+Claude will run `drift link` to stamp provenance and keep specs in sync as it makes code changes. When drift lint is in CI, stale specs block merges — so the agent can't silently break documentation.
+
 ## Usage
 
 Write a markdown spec, then bind it to code:
