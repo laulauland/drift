@@ -21,7 +21,7 @@ Install the CLI and the agent skill:
 
 ```bash
 zig build -Doptimize=ReleaseSafe --prefix ~/.local
-npx skills add laulauland/drift
+npx skills add fiberplane/drift
 ```
 
 The skill teaches Claude Code how to maintain drift bindings — when to link, when to update specs, and how to handle stale bindings. Once installed, you can tell Claude to add drift to your existing docs:
@@ -138,7 +138,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: laulauland/drift@main
+      - uses: fiberplane/drift@main
       - run: drift lint
 ```
 
