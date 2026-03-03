@@ -2,7 +2,7 @@ name: Setup Drift
 description: Install the drift CLI for spec-to-code staleness checking
 inputs:
   version:
-    description: Release tag to install (e.g. "nightly-42"). Defaults to latest.
+    description: Release tag to install (e.g. "v0.1.0"). Defaults to latest.
     required: false
     default: latest
 

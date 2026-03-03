@@ -1,36 +1,41 @@
-name: Release
+name: CI
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  generate-notes:
-    name: Generate release notes
+  lint:
+    name: Drift lint
     runs-on: ubuntu-22.04
-    outputs:
-      body: ${{ steps.cliff.outputs.content }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Generate changelog
-        id: cliff
-        uses: orhun/git-cliff-action@v4
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
         with:
-          args: --latest --strip header
+          version: 0.15.2
+
+      - name: Build drift
+        run: zig build -Doptimize=ReleaseSafe
+
+      - name: Lint specs
+        run: ./zig-out/bin/drift lint
 
   build:
     name: Build (${{ matrix.target }})
+    needs: [lint]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -64,32 +69,10 @@ jobs:
         run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.zig-target }}
 
       - name: Package
-        run: |
-          tar -czf drift-${{ matrix.target }}.tar.gz -C zig-out/bin drift
+        run: tar -czf drift-${{ matrix.target }}.tar.gz -C zig-out/bin drift
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: drift-${{ matrix.target }}
           path: drift-${{ matrix.target }}.tar.gz
-
-  release:
-    name: Create release
-    needs: [generate-notes, build]
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body: ${{ needs.generate-notes.outputs.body }}
-          prerelease: false
-          files: drift-*.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
