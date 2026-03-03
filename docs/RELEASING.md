@@ -36,8 +36,8 @@ Types `chore`, `style`, and `ci` are excluded from changelogs. Merge commits are
 1. Check what the next version should be: `git-cliff --bumped-version`
 2. Tag and push:
    ```
-   jj tag create vX.Y.Z
-   jj git push --tags
+   jj tag set vX.Y.Z -r main
+   GIT_DIR=.git git push origin vX.Y.Z
    ```
 3. The tag push triggers `.github/workflows/release.yml`, which:
    - Generates release notes with git-cliff (grouped by Features, Bug Fixes, Documentation, Refactor)
