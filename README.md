@@ -1,6 +1,7 @@
 <!-- drift:
   files:
-    - src/main.zig@kznzovvs
+    - src/main.zig@mtloqmvz
+
 -->
 
 # drift
@@ -147,3 +148,19 @@ jobs:
 ## VCS support
 
 git and jj. Auto-detected from `.jj` or `.git` directory. In jj, the `@change` provenance suffix stores stable change IDs that survive rewrites.
+
+## Development
+
+Requires Zig 0.15.2. The repo includes a `.tool-versions` file, so if you use [mise](https://mise.jdx.dev/) (or asdf):
+
+```bash
+mise install        # installs zig 0.15.2
+zig build test      # run tests
+zig build -Doptimize=ReleaseSafe  # build release binary
+```
+
+Enable the pre-push hook to run build, lint, and tests before every push:
+
+```bash
+git config core.hooksPath hooks
+```
