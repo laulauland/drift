@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+echo "pre-push: building drift..."
+zig build -Doptimize=ReleaseSafe
+
+echo "pre-push: running drift lint..."
+./zig-out/bin/drift lint
+
+echo "pre-push: running tests..."
+zig build test
