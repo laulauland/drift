@@ -12,12 +12,6 @@ Any markdown file in your repo can declare bindings to code — specific files o
 ## Install
 
 ```bash
-brew install laulauland/tap/drift
-```
-
-Or build from source:
-
-```bash
 zig build -Doptimize=ReleaseSafe --prefix ~/.local
 ```
 
@@ -26,7 +20,7 @@ zig build -Doptimize=ReleaseSafe --prefix ~/.local
 Install the CLI and the agent skill:
 
 ```bash
-brew install laulauland/tap/drift
+zig build -Doptimize=ReleaseSafe --prefix ~/.local
 npx skills add laulauland/drift
 ```
 
