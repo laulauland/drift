@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - src/main.zig@nsqnzlrv
-    - src/symbols.zig@nsqnzlrv
-    - src/vcs.zig@nsqnzlrv
+    - src/main.zig@lpqxspws
+    - src/symbols.zig@lpqxspws
+    - src/vcs.zig@lpqxspws
 ---
 
 # Decisions
@@ -14,12 +14,9 @@ The previous drift implementation was TypeScript/Bun with the Effect ecosystem. 
 
 - Tree-sitter is a C library. Zig has first-class C interop — no N-API bindings, no WASM overhead, no native addon compatibility issues.
 - drift is a lint tool. It should be fast enough to run as a pre-commit hook with no perceptible delay. Zig produces a single static binary with predictable performance.
-- The sibling project (lore) is Zig with the same tree-sitter infrastructure. Shared knowledge, shared patterns, potentially shared code.
 - drift's scope shrank significantly during redesign. The execution engine, build artifacts, server, and UI were all removed. What remains (parse markdown, resolve symbols, query VCS, format output) is ~2k lines of Zig.
 
 ## 2. On-demand parsing, no index
-
-lore builds a full FactDb — indexes every file, extracts every symbol, builds call graphs, caches to disk. drift does not.
 
 drift knows exactly which files it cares about — they're declared in spec frontmatter and `@` imports. It parses only those files, only when checking them. A lint run that touches 20 files does 20 tree-sitter parses. No index, no cache, no invalidation logic.
 
@@ -50,7 +47,7 @@ We considered a lockfile (stored content hashes per binding). A lockfile would e
 
 File-level bindings are coarse. If a spec binds to `src/auth/provider.ts` and someone adds an unrelated utility at the bottom of the file, the spec is flagged stale for no reason.
 
-Symbol-level bindings (`src/auth/provider.ts#AuthConfig`) resolve to a specific AST declaration. Only changes to that symbol trigger staleness. This uses tree-sitter with per-language `.scm` queries — the same infrastructure lore uses, but without the full extraction pipeline.
+Symbol-level bindings (`src/auth/provider.ts#AuthConfig`) resolve to a specific AST declaration. Only changes to that symbol trigger staleness. This uses tree-sitter with per-language `.scm` queries.
 
 The resolution is simple: parse file, run query, filter by symbol name, hash the matched node's text. If the symbol is not found, the binding is reported as STALE with reason "symbol not found".
 
@@ -72,7 +69,7 @@ Discovery is by scanning — drift walks the repo looking for markdown files wit
 
 ## 7. git and jj support, auto-detected
 
-drift shells out to git or jj rather than using a library. This mirrors lore's approach. The VCS is auto-detected by checking for `.jj` (preferred) or `.git`.
+drift shells out to git or jj rather than using a library. The VCS is auto-detected by checking for `.jj` (preferred) or `.git`.
 
 jj's stable change IDs are a better fit for provenance tracking (the `@change` suffix on bindings) because they survive rewrites. git SHAs may become unreachable after rebase, but staleness detection uses file-level VCS history queries, not stored SHAs, so this doesn't affect correctness.
 
