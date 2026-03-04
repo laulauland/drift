@@ -10,6 +10,7 @@ const Spec = scanner.Spec;
 const version = "0.1.0";
 
 const SubCommand = enum {
+    check,
     lint,
     status,
     link,
@@ -68,12 +69,12 @@ pub fn main() !void {
 
     const command = std.meta.stringToEnum(SubCommand, command_str) orelse {
         stderr_w.interface.print("unknown command: {s}\n", .{command_str}) catch {};
-        stderr_w.interface.print("available commands: lint, status, link, unlink\n", .{}) catch {};
+        stderr_w.interface.print("available commands: check, lint, status, link, unlink\n", .{}) catch {};
         return error.InvalidCommand;
     };
 
     switch (command) {
-        .lint => runLint(allocator, &stdout_w.interface, &stderr_w.interface) catch |err| {
+        .check, .lint => runLint(allocator, &stdout_w.interface, &stderr_w.interface) catch |err| {
             stderr_w.interface.print("lint error: {s}\n", .{@errorName(err)}) catch {};
         },
         .status => runStatus(allocator, &stdout_w.interface, &stderr_w.interface) catch |err| {
