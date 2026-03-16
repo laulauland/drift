@@ -3,12 +3,16 @@ const std = @import("std");
 pub const VcsKind = enum { git, jj };
 
 /// Detect whether the current working directory uses jj or git.
-/// Prefers jj (checks `.jj/` first), falls back to git.
+/// Always returns git for now — jj change IDs don't resolve in git-only CI,
+/// and colocated repos have git underneath anyway. Re-enable when jj-native
+/// forges exist and CI can resolve change IDs natively.
 pub fn detectVcs() VcsKind {
-    std.fs.cwd().access(".jj", .{}) catch {
-        return .git;
-    };
-    return .jj;
+    // TODO: re-enable jj detection when jj-native forges exist
+    // std.fs.cwd().access(".jj", .{}) catch {
+    //     return .git;
+    // };
+    // return .jj;
+    return .git;
 }
 
 /// Get the last commit/change ID that touched a given file path.

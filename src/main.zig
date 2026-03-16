@@ -319,7 +319,7 @@ fn checkAnchorByContent(
     detected_vcs: vcs.VcsKind,
 ) !AnchorStatus {
     // Get historical content at provenance revision.
-    // Fall back to spec's last commit if provenance is unresolvable (e.g. jj change ID in git-only CI).
+    // Fall back to spec's last commit if provenance is unresolvable (e.g. manually-written jj change ID).
     const historical_content = blk: {
         const from_prov = vcs.getFileAtRevision(allocator, cwd_path, provenance, file_path, detected_vcs) catch null;
         if (from_prov) |content| break :blk content;

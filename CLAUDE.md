@@ -8,7 +8,7 @@
 - C interop: tree-sitter (vendor/tree-sitter + vendor/zig-tree-sitter, parsed on demand)
 - Grammars: lazy zig build deps (not vendored)
 - CLI: zig-clap 0.11.0
-- VCS: shell out to git/jj (no libgit2)
+- VCS: shell out to git (jj support disabled until jj-native forges exist)
 - Hashing: std.hash.XxHash3 for content comparison
 
 ## Architecture

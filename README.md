@@ -48,7 +48,7 @@ drift link docs/auth.md src/auth/login.ts
 drift link docs/auth.md src/auth/provider.ts#AuthConfig
 ```
 
-`drift link` adds the anchor to the spec's YAML frontmatter and auto-appends provenance (current git HEAD or jj change ID). You can also reference code inline — `@./src/auth/provider.ts#AuthConfig` in the spec body — and `drift link` will stamp those with provenance too.
+`drift link` adds the anchor to the spec's YAML frontmatter and auto-appends provenance (current git HEAD). You can also reference code inline — `@./src/auth/provider.ts#AuthConfig` in the spec body — and `drift link` will stamp those with provenance too.
 
 Check if specs are fresh:
 
@@ -70,13 +70,13 @@ After linking, your spec has frontmatter anchors and (optionally) inline referen
 ---
 drift:
   files:
-    - src/auth/login.ts@qpvuntsm
-    - src/auth/provider.ts#AuthConfig@qpvuntsm
+    - src/auth/login.ts@a1b2c3d
+    - src/auth/provider.ts#AuthConfig@a1b2c3d
 ---
 
 # Auth Architecture
 
-Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@qpvuntsm ...
+Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@a1b2c3d ...
 ```
 
 Each anchor carries provenance via an `@change` suffix — a snapshot of which VCS change you last reviewed that file at. Provenance is per-anchor, so different files track independently.
@@ -86,8 +86,8 @@ If you don't want frontmatter visible in render frontends like GitHub, wrap it i
 ```markdown
 <!-- drift:
   files:
-    - src/auth/login.ts@qpvuntsm
-    - src/auth/provider.ts#AuthConfig@qpvuntsm
+    - src/auth/login.ts@a1b2c3d
+    - src/auth/provider.ts#AuthConfig@a1b2c3d
 -->
 ```
 
@@ -151,7 +151,7 @@ jobs:
 
 ## VCS support
 
-git and jj. Auto-detected from `.jj` or `.git` directory. In jj, the `@change` provenance suffix stores stable change IDs that survive rewrites.
+git. jj support is planned for when jj-native forges exist — until then, colocated jj repos use git provenance, which works in both local and CI environments.
 
 ## Development
 
