@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - src/main.zig@b727e357
-    - src/symbols.zig@b727e357
-    - src/vcs.zig@b727e357
+    - src/main.zig@c258b580
+    - src/symbols.zig@c258b580
+    - src/vcs.zig@c258b580
 ---
 
 # Decisions
