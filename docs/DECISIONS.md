@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - src/main.zig@8dc8010
-    - src/symbols.zig@8dc8010
-    - src/vcs.zig@8dc8010
+    - src/main.zig@6c0cfb0
+    - src/symbols.zig@6c0cfb0
+    - src/vcs.zig@6c0cfb0
 ---
 
 # Decisions
@@ -34,7 +34,7 @@ The alternative (a central evidence file) enables querying "which specs bind to 
 
 ## 4. VCS-based staleness, no lockfile
 
-Staleness is detected by comparing VCS history: "was any bound file modified after the spec was last modified?" This requires no stored state beyond what the VCS already tracks.
+Staleness is detected by comparing the current code against the bound code at a baseline revision in VCS. For supported tree-sitter languages, drift compares normalized syntax fingerprints so formatting-only changes don't trigger drift; unsupported files fall back to raw content comparison. This requires no stored state beyond what the VCS already tracks.
 
 We considered a lockfile (stored content hashes per anchor). A lockfile would enable offline staleness detection and wouldn't depend on VCS history ordering. We rejected it because:
 
@@ -49,7 +49,7 @@ File-level anchors are coarse. If a spec binds to `src/auth/provider.ts` and som
 
 Symbol-level anchors (`src/auth/provider.ts#AuthConfig`) resolve to a specific AST declaration. Only changes to that symbol trigger staleness. This uses tree-sitter with per-language `.scm` queries.
 
-The resolution is simple: parse file, run query, filter by symbol name, hash the matched node's text. If the symbol is not found, the anchor is reported as STALE with reason "symbol not found".
+The resolution is simple: parse file, run query, filter by symbol name, and hash a normalized traversal of the matched node's subtree. That ignores formatting-only changes while still catching syntax/token changes. If the symbol is not found, the anchor is reported as STALE with reason "symbol not found".
 
 We chose tree-sitter over regex because:
 - Regex breaks on string literals containing declaration keywords

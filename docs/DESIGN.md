@@ -1,11 +1,11 @@
 ---
 drift:
   files:
-    - src/main.zig@8dc8010
-    - src/frontmatter.zig@8dc8010
-    - src/scanner.zig@8dc8010
-    - src/symbols.zig@8dc8010
-    - src/vcs.zig@8dc8010
+    - src/main.zig@6c0cfb0
+    - src/frontmatter.zig@6c0cfb0
+    - src/scanner.zig@6c0cfb0
+    - src/symbols.zig@6c0cfb0
+    - src/vcs.zig@6c0cfb0
 ---
 
 # Design
@@ -60,7 +60,7 @@ In jj, change IDs are stable across rewrites. In git, SHAs may become unreachabl
 
 ### Symbol-Level Anchors
 
-An anchor like `src/auth/provider.ts#AuthConfig` resolves to a specific AST symbol rather than the whole file. drift parses the file with tree-sitter, finds the symbol's declaration, and hashes its content. Changes elsewhere in the file don't trigger staleness.
+An anchor like `src/auth/provider.ts#AuthConfig` resolves to a specific AST symbol rather than the whole file. drift parses the file with tree-sitter, finds the symbol's declaration, and hashes a normalized representation of that subtree. Changes elsewhere in the file don't trigger staleness, and formatting-only changes inside the symbol are ignored.
 
 Resolution uses tree-sitter `.scm` queries per language. A simple query finds named declarations:
 
@@ -74,7 +74,7 @@ Resolution uses tree-sitter `.scm` queries per language. A simple query finds na
 ] @definition
 ```
 
-Filter captures where `@name` matches the target symbol. Extract `@definition` node text. Hash it.
+Filter captures where `@name` matches the target symbol. Extract the `@definition` subtree and hash a normalized traversal of it (node kinds, structure, and token text; no layout/position data).
 
 If the symbol is not found, the anchor is reported as STALE with reason "symbol not found".
 
@@ -88,18 +88,18 @@ For each spec, drift determines staleness by comparing VCS history. Provenance i
 
 1. For each anchor, determine its baseline — the anchor's provenance change if present, otherwise the last commit that modified the spec file
 2. Check the anchor against its baseline:
-   - **File-level**: was this file modified in any commit after the baseline?
-   - **Symbol-level**: parse the file, hash the symbol content, compare against the hash at the baseline
+   - **File-level**: for supported tree-sitter languages, parse the file and hash a normalized syntax fingerprint of the file; otherwise compare raw file content
+   - **Symbol-level**: parse the file, hash a normalized syntax fingerprint of the symbol, compare against the fingerprint at the baseline
 3. If any anchor has changed after its baseline, the spec is stale
 
-The VCS query is:
+The baseline lookup is:
 ```
-git log <baseline>..HEAD -- <bound-file>
+git show <baseline>:<bound-file>
 ```
 
 In jj:
 ```
-jj log -r '<baseline>..@' --no-graph -T 'change_id' -- <bound-file>
+jj file show -r <baseline> <bound-file>
 ```
 
 Because provenance is per-anchor, updating one anchor's change reference doesn't affect staleness detection for other anchors in the same spec. A spec with three anchors can have two fresh and one stale.
@@ -177,7 +177,7 @@ Walks the repo looking for markdown files with `drift:` frontmatter. Parses fron
 For each anchor, resolves the current state:
 
 - **File-level**: stat the file, hash its content
-- **Symbol-level**: parse with tree-sitter, find the symbol via `.scm` query, hash the symbol's content
+- **Symbol-level**: parse with tree-sitter, find the symbol via `.scm` query, hash a normalized syntax fingerprint of the symbol
 
 Parsing is on-demand. Only files that are actually bound get parsed. A lint run that checks 10 specs anchoring to 30 symbols across 20 files does 20 tree-sitter parses — milliseconds.
 

@@ -284,21 +284,14 @@ fn checkAnchor(
         }
     }
 
-    // Content-based staleness check when provenance is present
+    // Compare current state against the anchor's baseline revision.
+    // If the anchor has explicit provenance, use that. Otherwise fall back to
+    // the last revision that touched the spec file.
     if (provenance) |prov| {
         return checkAnchorByContent(allocator, cwd_path, anchor, file_path, symbol_name, prov, spec_commit, detected_vcs);
     }
-
-    // No provenance: use VCS history-based check
     if (spec_commit) |commit| {
-        const is_stale = vcs.checkStaleness(allocator, cwd_path, commit, file_path, detected_vcs) catch false;
-        if (is_stale) {
-            return .{
-                .label = try allocator.dupe(u8, "STALE"),
-                .display = anchor,
-                .reason = try allocator.dupe(u8, "changed after spec"),
-            };
-        }
+        return checkAnchorByContent(allocator, cwd_path, anchor, file_path, symbol_name, commit, spec_commit, detected_vcs);
     }
 
     return .{
@@ -367,8 +360,8 @@ fn checkAnchorByContent(
             };
         };
 
-        const current_range = symbols.extractSymbolContent(current_content, lang_query, sym);
-        if (current_range == null) {
+        const current_fingerprint = symbols.fingerprintSymbolSyntax(current_content, lang_query, sym);
+        if (current_fingerprint == null) {
             return .{
                 .label = try allocator.dupe(u8, "STALE"),
                 .display = anchor,
@@ -376,8 +369,8 @@ fn checkAnchorByContent(
             };
         }
 
-        const historical_range = symbols.extractSymbolContent(historical_content.?, lang_query, sym);
-        if (historical_range == null) {
+        const historical_fingerprint = symbols.fingerprintSymbolSyntax(historical_content.?, lang_query, sym);
+        if (historical_fingerprint == null) {
             // Symbol didn't exist at provenance
             return .{
                 .label = try allocator.dupe(u8, "STALE"),
@@ -386,10 +379,7 @@ fn checkAnchorByContent(
             };
         }
 
-        const current_sym = current_content[current_range.?[0]..current_range.?[1]];
-        const historical_sym = historical_content.?[historical_range.?[0]..historical_range.?[1]];
-
-        if (!std.mem.eql(u8, current_sym, historical_sym)) {
+        if (current_fingerprint.? != historical_fingerprint.?) {
             return .{
                 .label = try allocator.dupe(u8, "STALE"),
                 .display = anchor,
@@ -398,12 +388,34 @@ fn checkAnchorByContent(
         }
     } else {
         // File-level comparison
-        if (!std.mem.eql(u8, historical_content.?, current_content)) {
-            return .{
-                .label = try allocator.dupe(u8, "STALE"),
-                .display = anchor,
-                .reason = try allocator.dupe(u8, "changed after spec"),
-            };
+        const ext = std.fs.path.extension(file_path);
+        if (symbols.languageForExtension(ext)) |lang_query| {
+            const current_fingerprint = symbols.fingerprintFileSyntax(current_content, lang_query);
+            const historical_fingerprint = symbols.fingerprintFileSyntax(historical_content.?, lang_query);
+
+            if (current_fingerprint == null or historical_fingerprint == null) {
+                if (!std.mem.eql(u8, historical_content.?, current_content)) {
+                    return .{
+                        .label = try allocator.dupe(u8, "STALE"),
+                        .display = anchor,
+                        .reason = try allocator.dupe(u8, "changed after spec"),
+                    };
+                }
+            } else if (current_fingerprint.? != historical_fingerprint.?) {
+                return .{
+                    .label = try allocator.dupe(u8, "STALE"),
+                    .display = anchor,
+                    .reason = try allocator.dupe(u8, "changed after spec"),
+                };
+            }
+        } else {
+            if (!std.mem.eql(u8, historical_content.?, current_content)) {
+                return .{
+                    .label = try allocator.dupe(u8, "STALE"),
+                    .display = anchor,
+                    .reason = try allocator.dupe(u8, "changed after spec"),
+                };
+            }
         }
     }
 

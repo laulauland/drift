@@ -1,6 +1,88 @@
 const std = @import("std");
 const helpers = @import("helpers");
 
+fn expectFormattingOnlyFileChangeIsFresh(
+    allocator: std.mem.Allocator,
+    file_path: []const u8,
+    initial_source: []const u8,
+    reformatted_source: []const u8,
+) !void {
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile(file_path, initial_source);
+    try repo.writeFile("docs/spec.md", "# Spec\n");
+    try repo.commit("add initial source and spec");
+
+    const link_result = try repo.runDrift(&.{ "link", "docs/spec.md", file_path });
+    defer link_result.deinit(allocator);
+
+    try helpers.expectExitCode(link_result.term, 0);
+
+    const linked_spec = try repo.readFile("docs/spec.md");
+    defer allocator.free(linked_spec);
+
+    const linked_anchor = try std.fmt.allocPrint(allocator, "{s}@", .{file_path});
+    defer allocator.free(linked_anchor);
+    try helpers.expectContains(linked_spec, linked_anchor);
+
+    try repo.commit("link spec to source file");
+
+    try repo.writeFile(file_path, reformatted_source);
+    try repo.commit("reformat source without syntax changes");
+
+    const check_result = try repo.runDrift(&.{"check"});
+    defer check_result.deinit(allocator);
+
+    try helpers.expectExitCode(check_result.term, 0);
+    const output = if (check_result.stdout.len > 0) check_result.stdout else check_result.stderr;
+    try helpers.expectContains(output, "docs/spec.md");
+    try helpers.expectContains(output, "ok");
+    try helpers.expectNotContains(output, "STALE");
+}
+
+fn expectFormattingOnlySymbolChangeIsFresh(
+    allocator: std.mem.Allocator,
+    file_path: []const u8,
+    symbol_anchor: []const u8,
+    initial_source: []const u8,
+    reformatted_source: []const u8,
+) !void {
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile(file_path, initial_source);
+    try repo.writeFile("docs/spec.md", "# Spec\n");
+    try repo.commit("add initial source and spec");
+
+    const link_result = try repo.runDrift(&.{ "link", "docs/spec.md", symbol_anchor });
+    defer link_result.deinit(allocator);
+
+    try helpers.expectExitCode(link_result.term, 0);
+
+    const linked_spec = try repo.readFile("docs/spec.md");
+    defer allocator.free(linked_spec);
+
+    const linked_anchor = try std.fmt.allocPrint(allocator, "{s}@", .{symbol_anchor});
+    defer allocator.free(linked_anchor);
+    try helpers.expectContains(linked_spec, linked_anchor);
+
+    try repo.commit("link spec to source symbol");
+
+    // Reformat the bound symbol without changing its syntax or behavior.
+    try repo.writeFile(file_path, reformatted_source);
+    try repo.commit("reformat source without syntax changes");
+
+    const check_result = try repo.runDrift(&.{"check"});
+    defer check_result.deinit(allocator);
+
+    try helpers.expectExitCode(check_result.term, 0);
+    const output = if (check_result.stdout.len > 0) check_result.stdout else check_result.stderr;
+    try helpers.expectContains(output, "docs/spec.md");
+    try helpers.expectContains(output, "ok");
+    try helpers.expectNotContains(output, "STALE");
+}
+
 test "lint reports ok for spec with no anchors" {
     const allocator = std.testing.allocator;
     var repo = try helpers.TempRepo.init(allocator);
@@ -231,4 +313,199 @@ test "lint reports stale for missing symbol anchor" {
     try helpers.expectContains(output, "STALE");
     try helpers.expectContains(output, "src/lib.ts#MissingSymbol");
     try helpers.expectContains(output, "symbol not found");
+}
+
+test "check ignores typescript formatting-only file change" {
+    const allocator = std.testing.allocator;
+
+    const initial_source =
+        \\function add(a: number, b: number): number {
+        \\  return a + b;
+        \\}
+        \\
+    ;
+    const reformatted_source =
+        \\function add(
+        \\  a: number,
+        \\  b: number
+        \\): number {
+        \\  return a + b;
+        \\}
+        \\
+    ;
+
+    try expectFormattingOnlyFileChangeIsFresh(
+        allocator,
+        "src/math.ts",
+        initial_source,
+        reformatted_source,
+    );
+}
+
+test "check ignores python formatting-only file change" {
+    const allocator = std.testing.allocator;
+
+    const initial_source =
+        \\def greet(name: str, excited: bool = False) -> str:
+        \\    return "Hello, " + name + ("!" if excited else ".")
+        \\
+    ;
+    const reformatted_source =
+        \\def greet(
+        \\    name: str,
+        \\    excited: bool = False
+        \\) -> str:
+        \\    return "Hello, " + name + ("!" if excited else ".")
+        \\
+    ;
+
+    try expectFormattingOnlyFileChangeIsFresh(
+        allocator,
+        "src/greet.py",
+        initial_source,
+        reformatted_source,
+    );
+}
+
+test "check ignores rust formatting-only file change" {
+    const allocator = std.testing.allocator;
+
+    const initial_source =
+        \\pub fn greet(name: &str, excited: bool) -> String {
+        \\    format!("Hello, {}{}", name, if excited { "!" } else { "." })
+        \\}
+        \\
+    ;
+    const reformatted_source =
+        \\pub fn greet(
+        \\    name: &str,
+        \\    excited: bool
+        \\) -> String {
+        \\    format!("Hello, {}{}", name, if excited { "!" } else { "." })
+        \\}
+        \\
+    ;
+
+    try expectFormattingOnlyFileChangeIsFresh(
+        allocator,
+        "src/greet.rs",
+        initial_source,
+        reformatted_source,
+    );
+}
+
+test "check ignores typescript formatting-only symbol change" {
+    const allocator = std.testing.allocator;
+
+    const initial_source =
+        \\function add(a: number, b: number): number {
+        \\  return a + b;
+        \\}
+        \\
+    ;
+    const reformatted_source =
+        \\function add(
+        \\  a: number,
+        \\  b: number
+        \\): number {
+        \\  return a + b;
+        \\}
+        \\
+    ;
+
+    try expectFormattingOnlySymbolChangeIsFresh(
+        allocator,
+        "src/math.ts",
+        "src/math.ts#add",
+        initial_source,
+        reformatted_source,
+    );
+}
+
+test "check ignores python formatting-only symbol change" {
+    const allocator = std.testing.allocator;
+
+    const initial_source =
+        \\def greet(name: str, excited: bool = False) -> str:
+        \\    return "Hello, " + name + ("!" if excited else ".")
+        \\
+    ;
+    const reformatted_source =
+        \\def greet(
+        \\    name: str,
+        \\    excited: bool = False
+        \\) -> str:
+        \\    return "Hello, " + name + ("!" if excited else ".")
+        \\
+    ;
+
+    try expectFormattingOnlySymbolChangeIsFresh(
+        allocator,
+        "src/greet.py",
+        "src/greet.py#greet",
+        initial_source,
+        reformatted_source,
+    );
+}
+
+test "check ignores rust formatting-only symbol change" {
+    const allocator = std.testing.allocator;
+
+    const initial_source =
+        \\pub fn greet(name: &str, excited: bool) -> String {
+        \\    format!("Hello, {}{}", name, if excited { "!" } else { "." })
+        \\}
+        \\
+    ;
+    const reformatted_source =
+        \\pub fn greet(
+        \\    name: &str,
+        \\    excited: bool
+        \\) -> String {
+        \\    format!("Hello, {}{}", name, if excited { "!" } else { "." })
+        \\}
+        \\
+    ;
+
+    try expectFormattingOnlySymbolChangeIsFresh(
+        allocator,
+        "src/greet.rs",
+        "src/greet.rs#greet",
+        initial_source,
+        reformatted_source,
+    );
+}
+
+test "check still reports stale after typescript symbol token change" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile(
+        "src/math.ts",
+        "function add(a: number, b: number): number {\n  return a + b;\n}\n",
+    );
+    try repo.writeFile("docs/spec.md", "# Spec\n");
+    try repo.commit("add initial source and spec");
+
+    const link_result = try repo.runDrift(&.{ "link", "docs/spec.md", "src/math.ts#add" });
+    defer link_result.deinit(allocator);
+    try helpers.expectExitCode(link_result.term, 0);
+
+    try repo.commit("link spec to source symbol");
+
+    try repo.writeFile(
+        "src/math.ts",
+        "function add(a: number, b: number): number {\n  return a - b;\n}\n",
+    );
+    try repo.commit("change symbol behavior");
+
+    const check_result = try repo.runDrift(&.{"check"});
+    defer check_result.deinit(allocator);
+
+    try helpers.expectExitCode(check_result.term, 1);
+    const output = if (check_result.stdout.len > 0) check_result.stdout else check_result.stderr;
+    try helpers.expectContains(output, "STALE");
+    try helpers.expectContains(output, "src/math.ts#add");
+    try helpers.expectContains(output, "changed after spec");
 }

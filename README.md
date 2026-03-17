@@ -1,6 +1,7 @@
 <!-- drift:
   files:
-    - src/main.zig@vyzomlkz
+    - src/main.zig@6c0cfb0
+
 
 
 
@@ -102,9 +103,9 @@ drift unlink        Remove an anchor from a spec
 
 ## How staleness works
 
-For each anchor with provenance, drift compares the file's content at the provenance revision against its current content. If they differ, the spec is stale. This is content-based — git rebases that don't change content won't trigger false positives, and jj rewrites that do change content won't slip through.
+For each anchor with provenance, drift compares the bound code at the provenance revision against its current state. For supported tree-sitter languages, both file anchors and symbol anchors compare normalized syntax fingerprints that ignore formatting-only changes. Unsupported files fall back to raw content comparison. If the bound code differs, the spec is stale. This is content-based — git rebases that don't change content won't trigger false positives, and jj rewrites that do change content won't slip through.
 
-For symbol-level anchors (`#AuthConfig`), drift parses the file with tree-sitter and compares just the symbol's AST node. Changes elsewhere in the file don't trigger staleness.
+For symbol-level anchors (`#AuthConfig`), drift parses the file with tree-sitter and compares a normalized fingerprint of just that symbol's AST node. Formatting-only changes inside the symbol don't trigger staleness; syntax/token changes do.
 
 Staleness is reported with a reason:
 
