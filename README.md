@@ -10,9 +10,6 @@
 -->
 <img width="276" height="84" alt="Drift Logo" src="https://github.com/user-attachments/assets/19618b90-d43e-4e92-8497-9674a87693e2" />
 
-
-# drift
-
 Bind specs to code. Lint for drift.
 
 Any markdown file in your repo can declare anchors to code — specific files or AST symbols. When bound code changes, `drift lint` flags the spec as stale. Agents that change code must update the specs they affect.
