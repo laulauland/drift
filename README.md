@@ -8,7 +8,8 @@
 
 
 -->
-<img width="237" height="73" alt="drift" src="https://github.com/user-attachments/assets/c43ebd6d-3dd2-4122-9818-2e5b3ff866eb" />
+<img width="276" height="84" alt="Drift Logo" src="https://github.com/user-attachments/assets/19618b90-d43e-4e92-8497-9674a87693e2" />
+
 
 # drift
 
