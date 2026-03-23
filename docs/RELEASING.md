@@ -42,7 +42,7 @@ Types `chore`, `style`, and `ci` are excluded from changelogs. Merge commits are
 3. The tag push triggers `.github/workflows/release.yml`, which:
    - Generates release notes with git-cliff (grouped by Features, Bug Fixes, Documentation, Refactor)
    - Cross-compiles for all 4 targets with Zig 0.15.2
-   - Creates a GitHub release with the generated notes and all tarballs attached
+   - Creates a GitHub release with the generated notes, all tarballs, and matching `.sha256` checksum files attached
 
 ### CHANGELOG.md
 

@@ -1,5 +1,5 @@
 name: Setup Drift
-description: Install the drift CLI for spec-to-code staleness checking
+description: Install the drift CLI for spec-to-code staleness checking with checksum verification
 inputs:
   version:
     description: Release tag to install (e.g. "v0.1.0"). Defaults to latest.
@@ -41,8 +41,32 @@ runs:
     - name: Download and install
       shell: bash
       run: |
+        TMP_DIR=$(mktemp -d)
+        trap 'rm -rf "$TMP_DIR"' EXIT
+
         URL="https://github.com/fiberplane/drift/releases/download/${{ steps.version.outputs.tag }}/drift-${{ steps.platform.outputs.target }}.tar.gz"
-        curl -fsSL "$URL" | tar xz -C /usr/local/bin
+        CHECKSUM_URL="${URL}.sha256"
+        ARCHIVE_PATH="$TMP_DIR/drift.tar.gz"
+        CHECKSUM_PATH="$TMP_DIR/drift.tar.gz.sha256"
+
+        curl -fsSL "$URL" -o "$ARCHIVE_PATH"
+        curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_PATH"
+
+        EXPECTED_CHECKSUM=$(tr -d '[:space:]' < "$CHECKSUM_PATH")
+        if command -v sha256sum >/dev/null 2>&1; then
+          ACTUAL_CHECKSUM=$(sha256sum "$ARCHIVE_PATH" | cut -d' ' -f1)
+        else
+          ACTUAL_CHECKSUM=$(shasum -a 256 "$ARCHIVE_PATH" | cut -d' ' -f1)
+        fi
+
+        if [ "$ACTUAL_CHECKSUM" != "$EXPECTED_CHECKSUM" ]; then
+          echo "::error::Checksum verification failed for drift download"
+          echo "Expected: $EXPECTED_CHECKSUM"
+          echo "Actual:   $ACTUAL_CHECKSUM"
+          exit 1
+        fi
+
+        tar -xzf "$ARCHIVE_PATH" -C /usr/local/bin
         chmod +x /usr/local/bin/drift
         drift --help > /dev/null 2>&1 || true
         echo "Installed drift ${{ steps.version.outputs.tag }} (${{ steps.platform.outputs.target }})"

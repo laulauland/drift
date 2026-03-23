@@ -66,13 +66,22 @@ jobs:
 
       - name: Package
         run: |
-          tar -czf drift-${{ matrix.target }}.tar.gz -C zig-out/bin drift
+          TAR="drift-${{ matrix.target }}.tar.gz"
+          tar -czf "$TAR" -C zig-out/bin drift
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$TAR" | cut -d' ' -f1 > "$TAR.sha256"
+          else
+            shasum -a 256 "$TAR" | cut -d' ' -f1 > "$TAR.sha256"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: drift-${{ matrix.target }}
-          path: drift-${{ matrix.target }}.tar.gz
+          path: |
+            drift-${{ matrix.target }}.tar.gz
+            drift-${{ matrix.target }}.tar.gz.sha256
 
   release:
     name: Create release
@@ -91,6 +100,8 @@ jobs:
           name: ${{ github.ref_name }}
           body: ${{ needs.generate-notes.outputs.body }}
           prerelease: false
-          files: drift-*.tar.gz
+          files: |
+            drift-*.tar.gz
+            drift-*.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
