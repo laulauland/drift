@@ -17,6 +17,18 @@ Any markdown file in your repo can declare anchors to code — specific files or
 ## Install
 
 ```bash
+curl -fsSL https://drift.fp.dev/install.sh | sh
+```
+
+To install a specific version:
+
+```bash
+curl -fsSL https://drift.fp.dev/install.sh | sh -s -- --version v0.1.0
+```
+
+Or build from source:
+
+```bash
 zig build -Doptimize=ReleaseSafe --prefix ~/.local
 ```
 
@@ -25,7 +37,7 @@ zig build -Doptimize=ReleaseSafe --prefix ~/.local
 Install the CLI and the agent skill:
 
 ```bash
-zig build -Doptimize=ReleaseSafe --prefix ~/.local
+curl -fsSL https://drift.fp.dev/install.sh | sh
 npx skills add fiberplane/drift
 ```
 
@@ -147,7 +159,7 @@ jobs:
       - run: drift lint
 ```
 
-`fetch-depth: 0` is required — drift needs VCS history to compare content at provenance revisions. The setup action auto-detects platform and downloads the right binary from GitHub releases.
+`fetch-depth: 0` is required — drift needs VCS history to compare content at provenance revisions. The setup action auto-detects platform, downloads the right binary from GitHub releases, and verifies its checksum before installing.
 
 ## VCS support
 
