@@ -116,9 +116,7 @@ fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
         specs.deinit(allocator);
     }
 
-    var root_dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
-    defer root_dir.close();
-    try scanner.walkForSpecs(allocator, root_dir, "", &specs);
+    try scanner.findSpecs(allocator, &specs);
 
     // Parse inline anchors from body content of each spec
     for (specs.items) |*spec| {
@@ -454,9 +452,7 @@ fn runStatus(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *
         specs.deinit(allocator);
     }
 
-    var root_dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
-    defer root_dir.close();
-    try scanner.walkForSpecs(allocator, root_dir, "", &specs);
+    try scanner.findSpecs(allocator, &specs);
 
     // Sort specs by path for deterministic output
     std.mem.sort(Spec, specs.items, {}, struct {

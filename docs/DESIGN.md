@@ -170,7 +170,7 @@ Additional modules:
 
 ### scanner.zig
 
-Walks the repo looking for markdown files with `drift:` frontmatter. Parses frontmatter to extract explicit anchors. Parses content to extract implicit anchors (`@` references). No index — scans on every run. Performance is bounded by the number of markdown files, not the size of the codebase.
+Lists git-tracked markdown files via `git ls-files`, respecting `.gitignore`. Parses frontmatter to extract explicit anchors. Parses content to extract implicit anchors (`@` references). No index — scans on every run. Performance is bounded by the number of markdown files, not the size of the codebase.
 
 ### symbols.zig
 

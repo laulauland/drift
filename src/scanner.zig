@@ -12,54 +12,35 @@ pub const Spec = struct {
     }
 };
 
-pub const skip_dirs = [_][]const u8{ ".git", ".jj", "node_modules", "vendor", ".zig-cache" };
+/// Discover specs by listing git-tracked markdown files.
+/// Respects .gitignore — untracked/ignored files are never scanned.
+pub fn findSpecs(allocator: std.mem.Allocator, specs: *std.ArrayList(Spec)) !void {
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "git", "ls-files", "--cached", "--others", "--exclude-standard", "*.md", "**/*.md" },
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
 
-pub fn shouldSkipDir(name: []const u8) bool {
-    // Skip hidden directories (starting with '.')
-    if (name.len > 0 and name[0] == '.') return true;
-    for (skip_dirs) |skip| {
-        if (std.mem.eql(u8, name, skip)) return true;
-    }
-    return false;
-}
+    var iter = std.mem.splitScalar(u8, result.stdout, '\n');
+    while (iter.next()) |line| {
+        if (line.len == 0) continue;
 
-pub fn walkForSpecs(allocator: std.mem.Allocator, dir: std.fs.Dir, prefix: []const u8, specs: *std.ArrayList(Spec)) !void {
-    var iter = dir.iterate();
-    while (try iter.next()) |entry| {
-        if (entry.kind == .directory) {
-            if (shouldSkipDir(entry.name)) continue;
+        const file_path = try allocator.dupe(u8, line);
 
-            const sub_prefix = if (prefix.len == 0)
-                try allocator.dupe(u8, entry.name)
-            else
-                try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, entry.name });
-            defer allocator.free(sub_prefix);
+        const content = std.fs.cwd().readFileAlloc(allocator, file_path, 1024 * 1024) catch {
+            allocator.free(file_path);
+            continue;
+        };
+        defer allocator.free(content);
 
-            var sub_dir = dir.openDir(entry.name, .{ .iterate = true }) catch continue;
-            defer sub_dir.close();
-            try walkForSpecs(allocator, sub_dir, sub_prefix, specs);
-        } else if (entry.kind == .file) {
-            if (!std.mem.endsWith(u8, entry.name, ".md")) continue;
-
-            const file_path = if (prefix.len == 0)
-                try allocator.dupe(u8, entry.name)
-            else
-                try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, entry.name });
-
-            const content = dir.readFileAlloc(allocator, entry.name, 1024 * 1024) catch {
-                allocator.free(file_path);
-                continue;
-            };
-            defer allocator.free(content);
-
-            if (frontmatter.parseDriftSpec(allocator, content)) |anchors| {
-                try specs.append(allocator, .{
-                    .path = file_path,
-                    .anchors = anchors,
-                });
-            } else {
-                allocator.free(file_path);
-            }
+        if (frontmatter.parseDriftSpec(allocator, content)) |anchors| {
+            try specs.append(allocator, .{
+                .path = file_path,
+                .anchors = anchors,
+            });
+        } else {
+            allocator.free(file_path);
         }
     }
 }
