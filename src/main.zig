@@ -183,8 +183,7 @@ fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
                 stderr_w.print("error checking {s}: {s}\n", .{ anchor, @errorName(err) }) catch {};
                 continue;
             };
-            defer allocator.free(status.label);
-            defer allocator.free(status.reason);
+            defer status.deinit(allocator);
 
             if (!std.mem.eql(u8, status.label, "ok")) {
                 has_issues = true;
@@ -193,6 +192,10 @@ fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
                     stdout_w.print("  {s}   {s} ({s})\n", .{ status.label, status.display, status.reason }) catch {};
                 } else {
                     stdout_w.print("  {s}   {s}\n", .{ status.label, status.display }) catch {};
+                }
+                if (status.blame) |blame| {
+                    stdout_w.print("          changed by {s} in {s} ({s})\n", .{ blame.author, blame.commit_hash, blame.date }) catch {};
+                    stdout_w.print("          \"{s}\"\n", .{blame.subject}) catch {};
                 }
             }
         }
@@ -217,6 +220,13 @@ const AnchorStatus = struct {
     label: []const u8,
     display: []const u8,
     reason: []const u8,
+    blame: ?vcs.BlameInfo = null,
+
+    fn deinit(self: AnchorStatus, allocator: std.mem.Allocator) void {
+        allocator.free(self.label);
+        allocator.free(self.reason);
+        if (self.blame) |blame| blame.deinit(allocator);
+    }
 };
 
 fn checkAnchor(
@@ -334,11 +344,7 @@ fn checkAnchorByContent(
     defer allocator.free(current_content);
 
     if (historical_content == null) {
-        return .{
-            .label = try allocator.dupe(u8, "STALE"),
-            .display = anchor,
-            .reason = try allocator.dupe(u8, "changed after spec"),
-        };
+        return staleChangedAfterSpec(allocator, cwd_path, anchor, file_path, provenance, detected_vcs);
     }
 
     if (symbol_name) |sym| {
@@ -347,11 +353,7 @@ fn checkAnchorByContent(
         const lang_query = symbols.languageForExtension(ext) orelse {
             // Unsupported language: fall back to full-file comparison
             if (!std.mem.eql(u8, historical_content.?, current_content)) {
-                return .{
-                    .label = try allocator.dupe(u8, "STALE"),
-                    .display = anchor,
-                    .reason = try allocator.dupe(u8, "changed after spec"),
-                };
+                return staleChangedAfterSpec(allocator, cwd_path, anchor, file_path, provenance, detected_vcs);
             }
             return .{
                 .label = try allocator.dupe(u8, "ok"),
@@ -372,19 +374,11 @@ fn checkAnchorByContent(
         const historical_fingerprint = symbols.fingerprintSymbolSyntax(historical_content.?, lang_query, sym);
         if (historical_fingerprint == null) {
             // Symbol didn't exist at provenance
-            return .{
-                .label = try allocator.dupe(u8, "STALE"),
-                .display = anchor,
-                .reason = try allocator.dupe(u8, "changed after spec"),
-            };
+            return staleChangedAfterSpec(allocator, cwd_path, anchor, file_path, provenance, detected_vcs);
         }
 
         if (current_fingerprint.? != historical_fingerprint.?) {
-            return .{
-                .label = try allocator.dupe(u8, "STALE"),
-                .display = anchor,
-                .reason = try allocator.dupe(u8, "changed after spec"),
-            };
+            return staleChangedAfterSpec(allocator, cwd_path, anchor, file_path, provenance, detected_vcs);
         }
     } else {
         // File-level comparison
@@ -395,26 +389,14 @@ fn checkAnchorByContent(
 
             if (current_fingerprint == null or historical_fingerprint == null) {
                 if (!std.mem.eql(u8, historical_content.?, current_content)) {
-                    return .{
-                        .label = try allocator.dupe(u8, "STALE"),
-                        .display = anchor,
-                        .reason = try allocator.dupe(u8, "changed after spec"),
-                    };
+                    return staleChangedAfterSpec(allocator, cwd_path, anchor, file_path, provenance, detected_vcs);
                 }
             } else if (current_fingerprint.? != historical_fingerprint.?) {
-                return .{
-                    .label = try allocator.dupe(u8, "STALE"),
-                    .display = anchor,
-                    .reason = try allocator.dupe(u8, "changed after spec"),
-                };
+                return staleChangedAfterSpec(allocator, cwd_path, anchor, file_path, provenance, detected_vcs);
             }
         } else {
             if (!std.mem.eql(u8, historical_content.?, current_content)) {
-                return .{
-                    .label = try allocator.dupe(u8, "STALE"),
-                    .display = anchor,
-                    .reason = try allocator.dupe(u8, "changed after spec"),
-                };
+                return staleChangedAfterSpec(allocator, cwd_path, anchor, file_path, provenance, detected_vcs);
             }
         }
     }
@@ -423,6 +405,30 @@ fn checkAnchorByContent(
         .label = try allocator.dupe(u8, "ok"),
         .display = anchor,
         .reason = try allocator.dupe(u8, ""),
+    };
+}
+
+/// Build a STALE "changed after spec" status, enriched with blame info when available.
+fn staleChangedAfterSpec(
+    allocator: std.mem.Allocator,
+    cwd_path: []const u8,
+    anchor: []const u8,
+    file_path: []const u8,
+    provenance: []const u8,
+    detected_vcs: vcs.VcsKind,
+) !AnchorStatus {
+    const blame = vcs.getBlameInfo(allocator, cwd_path, file_path, provenance, detected_vcs) catch null;
+    errdefer if (blame) |b| b.deinit(allocator);
+
+    const label = try allocator.dupe(u8, "STALE");
+    errdefer allocator.free(label);
+    const reason = try allocator.dupe(u8, "changed after spec");
+
+    return .{
+        .label = label,
+        .display = anchor,
+        .reason = reason,
+        .blame = blame,
     };
 }
 

@@ -137,6 +137,77 @@ pub fn getFileAtRevision(
     return result.stdout;
 }
 
+/// Information about the most recent commit that changed a file after a given revision.
+pub const BlameInfo = struct {
+    author: []const u8,
+    commit_hash: []const u8,
+    date: []const u8,
+    subject: []const u8,
+
+    pub fn deinit(self: BlameInfo, allocator: std.mem.Allocator) void {
+        allocator.free(self.author);
+        allocator.free(self.commit_hash);
+        allocator.free(self.date);
+        allocator.free(self.subject);
+    }
+};
+
+/// Get blame info for the most recent commit that changed a file after a given revision.
+/// Returns null if no commits changed the file after the revision.
+/// Caller owns the returned BlameInfo and must call deinit on it.
+pub fn getBlameInfo(
+    allocator: std.mem.Allocator,
+    cwd_path: []const u8,
+    file_path: []const u8,
+    after_revision: []const u8,
+    vcs_kind: VcsKind,
+) !?BlameInfo {
+    switch (vcs_kind) {
+        .git => {
+            const range = try std.fmt.allocPrint(allocator, "{s}..HEAD", .{after_revision});
+            defer allocator.free(range);
+
+            const result = std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &.{ "git", "log", "-1", "--format=%an%n%h%n%ad%n%s", "--date=format:%b %d", range, "--", file_path },
+                .cwd = cwd_path,
+                .max_output_bytes = 256 * 1024,
+            }) catch return null;
+            defer allocator.free(result.stderr);
+
+            const stdout = result.stdout;
+            defer allocator.free(stdout);
+
+            const trimmed = std.mem.trimRight(u8, stdout, "\n\r ");
+            if (trimmed.len == 0) return null;
+
+            // Parse four newline-delimited fields: author, hash, date, subject
+            var lines = std.mem.splitScalar(u8, trimmed, '\n');
+            const author_raw = lines.next() orelse return null;
+            const hash_raw = lines.next() orelse return null;
+            const date_raw = lines.next() orelse return null;
+            const subject_raw = lines.rest();
+            if (subject_raw.len == 0) return null;
+
+            const author = try allocator.dupe(u8, author_raw);
+            errdefer allocator.free(author);
+            const commit_hash = try allocator.dupe(u8, hash_raw);
+            errdefer allocator.free(commit_hash);
+            const date = try allocator.dupe(u8, date_raw);
+            errdefer allocator.free(date);
+            const subject = try allocator.dupe(u8, subject_raw);
+
+            return .{
+                .author = author,
+                .commit_hash = commit_hash,
+                .date = date,
+                .subject = subject,
+            };
+        },
+        .jj => return null, // jj support disabled
+    }
+}
+
 /// Get the current change/commit ID (short form) for auto-provenance.
 pub fn getCurrentChangeId(allocator: std.mem.Allocator, cwd_path: []const u8, vcs: VcsKind) !?[]const u8 {
     const result = switch (vcs) {

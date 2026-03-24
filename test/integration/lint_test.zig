@@ -509,3 +509,28 @@ test "check still reports stale after typescript symbol token change" {
     try helpers.expectContains(output, "src/math.ts#add");
     try helpers.expectContains(output, "changed after spec");
 }
+
+test "lint includes blame info when anchored file changed after spec" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeSpec("docs/spec.md", &.{"src/main.ts"}, "# Spec\n");
+    try repo.writeFile("src/main.ts", "export function main() {}\n");
+    try repo.commit("add spec and source");
+
+    // Modify the anchored file with a descriptive commit message
+    try repo.writeFile("src/main.ts", "export function main() { return 42; }\n");
+    try repo.commit("refactor: update main return value");
+
+    const result = try repo.runDrift(&.{"lint"});
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 1);
+    const output = if (result.stdout.len > 0) result.stdout else result.stderr;
+    try helpers.expectContains(output, "STALE");
+    try helpers.expectContains(output, "changed after spec");
+    // Blame enrichment lines
+    try helpers.expectContains(output, "changed by");
+    try helpers.expectContains(output, "refactor: update main return value");
+}
