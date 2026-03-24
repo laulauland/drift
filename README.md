@@ -1,6 +1,5 @@
 
-
-
+<img width="276" height="84" alt="Drift Logo" src="https://github.com/user-attachments/assets/19618b90-d43e-4e92-8497-9674a87693e2" />
 
 Bind specs to code and check for drift.
 
@@ -12,22 +11,9 @@ Any markdown file in your repo can declare anchors to code — specific files or
 curl -fsSL https://drift.fp.dev/install.sh | sh
 ```
 
-To install a specific version:
-
-```bash
-curl -fsSL https://drift.fp.dev/install.sh | sh -s -- --version v0.1.0
-```
-
-Or build from source:
-
-```bash
-zig build -Doptimize=ReleaseSafe --prefix ~/.local
-```
-
 ### Coding agent skill (Claude Code, Codex)
 
 ```bash
-curl -fsSL https://drift.fp.dev/install.sh | sh
 npx skills add fiberplane/drift
 ```
 
