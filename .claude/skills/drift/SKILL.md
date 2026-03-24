@@ -3,10 +3,10 @@ name: drift
 description: Drift spec-to-code anchor conventions. Use when editing code that is bound by drift specs, updating specs, working with drift frontmatter, or when drift check reports stale anchors.
 drift:
   files:
-    - src/main.zig@bd70482
-    - src/frontmatter.zig@bd70482
-    - src/scanner.zig@bd70482
-    - src/vcs.zig@bd70482
+    - src/main.zig@d7d189a
+    - src/frontmatter.zig@d7d189a
+    - src/scanner.zig@d7d189a
+    - src/vcs.zig@d7d189a
 ---
 
 # Drift
