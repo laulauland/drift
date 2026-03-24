@@ -1,14 +1,8 @@
-<!-- drift:
-  files:
-    - src/main.zig@982ee91
 
 
 
 
--->
-<img width="276" height="84" alt="Drift Logo" src="https://github.com/user-attachments/assets/19618b90-d43e-4e92-8497-9674a87693e2" />
-
-Bind specs to code. Lint for drift.
+Bind specs to code and check for drift.
 
 Any markdown file in your repo can declare anchors to code — specific files or AST symbols. When bound code changes, `drift check` flags the spec as stale. Agents that change code must update the specs they affect.
 
@@ -62,7 +56,7 @@ Refresh all anchors in a spec after updating it:
 drift link docs/auth.md
 ```
 
-### What a spec looks like
+### What a spec anchor looks like
 
 After linking, your spec has frontmatter anchors and (optionally) inline references:
 
@@ -79,7 +73,16 @@ drift:
 Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@a1b2c3d4 ...
 ```
 
-Each anchor carries provenance via an `@<git-sha>` suffix — recording which commit you last reviewed that code at. Provenance is per-anchor, so different files track independently.
+Every anchor has three parts:
+
+```
+src/auth/provider.ts   #AuthConfig   @a1b2c3d4
+└── file path ──────┘  └─ symbol ─┘  └ provenance ┘
+```
+
+- **Path** — the file you're binding to, relative to the repo root.
+- **Symbol** — optional `#Name` suffix that narrows the anchor to a specific declaration (function, class, type). Only changes to that symbol trigger staleness.
+- **Provenance** — optional `@<git-sha>` recording which commit you last reviewed that code at. Stamped automatically by `drift link`. Per-anchor, so different files track independently.
 
 If you don't want frontmatter visible on GitHub, use an HTML comment instead:
 
