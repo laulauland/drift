@@ -4,15 +4,12 @@
 
 
 
-
-
-
 -->
 <img width="276" height="84" alt="Drift Logo" src="https://github.com/user-attachments/assets/19618b90-d43e-4e92-8497-9674a87693e2" />
 
 Bind specs to code. Lint for drift.
 
-Any markdown file in your repo can declare anchors to code — specific files or AST symbols. When bound code changes, `drift lint` flags the spec as stale. Agents that change code must update the specs they affect.
+Any markdown file in your repo can declare anchors to code — specific files or AST symbols. When bound code changes, `drift check` flags the spec as stale. Agents that change code must update the specs they affect.
 
 ## Install
 
@@ -32,24 +29,14 @@ Or build from source:
 zig build -Doptimize=ReleaseSafe --prefix ~/.local
 ```
 
-## Quickstart with Claude Code
-
-Install the CLI and the agent skill:
+### Coding agent skill (Claude Code, Codex)
 
 ```bash
 curl -fsSL https://drift.fp.dev/install.sh | sh
 npx skills add fiberplane/drift
 ```
 
-The skill teaches Claude Code how to maintain drift anchors — when to link, when to update specs, and how to handle stale anchors. Once installed, you can tell Claude to add drift to your existing docs:
-
-> "Add drift anchors to docs/auth.md for src/auth/login.ts and src/auth/provider.ts#AuthConfig"
-
-> "Run drift lint and fix any stale specs"
-
-> "Write a spec for the payment module and bind it to the relevant source files"
-
-Claude will run `drift link` to stamp provenance and keep specs in sync as it makes code changes. When drift lint is in CI, stale specs block merges — so the agent can't silently break documentation.
+The skill teaches coding agents how to maintain drift anchors. Once installed, the agent will run `drift link` to stamp provenance and keep specs in sync as it makes code changes. When `drift check` is in CI, stale specs block merges — so the agent can't silently break documentation.
 
 ## Usage
 
@@ -65,7 +52,7 @@ drift link docs/auth.md src/auth/provider.ts#AuthConfig
 Check if specs are fresh:
 
 ```
-drift lint
+drift check
 ```
 
 Refresh all anchors in a spec after updating it:
@@ -82,52 +69,51 @@ After linking, your spec has frontmatter anchors and (optionally) inline referen
 ---
 drift:
   files:
-    - src/auth/login.ts@a1b2c3d
-    - src/auth/provider.ts#AuthConfig@a1b2c3d
+    - src/auth/login.ts@a1b2c3d4
+    - src/auth/provider.ts#AuthConfig@a1b2c3d4
 ---
 
 # Auth Architecture
 
-Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@a1b2c3d ...
+Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@a1b2c3d4 ...
 ```
 
-Each anchor carries provenance via an `@change` suffix — a snapshot of which VCS change you last reviewed that file at. Provenance is per-anchor, so different files track independently.
+Each anchor carries provenance via an `@<git-sha>` suffix — recording which commit you last reviewed that code at. Provenance is per-anchor, so different files track independently.
 
-If you don't want frontmatter visible in render frontends like GitHub, wrap it in an HTML comment instead — drift picks it up the same way:
+If you don't want frontmatter visible on GitHub, use an HTML comment instead:
 
 ```markdown
 <!-- drift:
   files:
-    - src/auth/login.ts@a1b2c3d
-    - src/auth/provider.ts#AuthConfig@a1b2c3d
+    - src/auth/login.ts@a1b2c3d4
+    - src/auth/provider.ts#AuthConfig@a1b2c3d4
 -->
 ```
 
 ## Commands
 
 ```
-drift lint          Check all specs for staleness (exits 1 if stale)
+drift check         Check all specs for staleness (exits 1 if stale)
 drift status        Show all specs and their anchors
 drift link          Add an anchor to a spec (auto-appends provenance)
 drift unlink        Remove an anchor from a spec
 ```
 
+`drift lint` is an alias for `drift check`.
+
 ## How staleness works
 
-For each anchor with provenance, drift compares the bound code at the provenance revision against its current state. For supported tree-sitter languages, both file anchors and symbol anchors compare normalized syntax fingerprints that ignore formatting-only changes. Unsupported files fall back to raw content comparison. If the bound code differs, the spec is stale. This is content-based — git rebases that don't change content won't trigger false positives, and jj rewrites that do change content won't slip through.
-
-For symbol-level anchors (`#AuthConfig`), drift parses the file with tree-sitter and compares a normalized fingerprint of just that symbol's AST node. Formatting-only changes inside the symbol don't trigger staleness; syntax/token changes do.
-
-Staleness is reported with a reason:
+For each anchor, drift compares the bound code at the provenance revision against its current state. For supported languages (TypeScript, Python, Rust, Go, Zig, Java), comparison is syntax-aware — drift parses with tree-sitter and hashes a normalized AST fingerprint (node kinds + token text, no whitespace or position data). Reformatting won't trigger false positives. Symbol-level anchors (`#AuthConfig`) narrow this to just that declaration's subtree. Unsupported languages fall back to raw content comparison.
 
 ```
-$ drift lint
+$ drift check
 
 docs/auth.md
-  STALE   src/auth/provider.ts#AuthConfig
-          changed after spec
-  STALE   src/core/old-module.ts
-          file not found
+  STALE   src/auth/provider.ts#AuthConfig (changed after spec)
+          changed by mike in e4f8a2c (Mar 15)
+          "refactor: split auth config into separate concerns"
+  STALE   src/core/old-module.ts (file not found)
+  ok      src/auth/login.ts
 
 docs/payments.md
   ok
@@ -135,14 +121,9 @@ docs/payments.md
 1 spec stale, 1 ok
 ```
 
-Reasons include:
-- **changed after spec** — the bound file (or symbol) was modified after the spec
-- **file not found** — the bound file no longer exists
-- **symbol not found** — the bound symbol no longer exists in the file
-
 ## CI
 
-`drift lint` exits 1 when any spec is stale, so it works as a CI gate:
+`drift check` exits 1 when any spec is stale, so it works as a CI gate:
 
 ```yaml
 # .github/workflows/drift.yml
@@ -156,7 +137,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: fiberplane/drift@main
-      - run: drift lint
+      - run: drift check
 ```
 
 `fetch-depth: 0` is required — drift needs VCS history to compare content at provenance revisions. The setup action auto-detects platform, downloads the right binary from GitHub releases, and verifies its checksum before installing.
