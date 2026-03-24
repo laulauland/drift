@@ -1,12 +1,12 @@
 ---
 name: drift
-description: Drift spec-to-code anchor conventions. Use when editing code that is bound by drift specs, updating specs, working with drift frontmatter, or when drift lint reports stale anchors.
+description: Drift spec-to-code anchor conventions. Use when editing code that is bound by drift specs, updating specs, working with drift frontmatter, or when drift check reports stale anchors.
 drift:
   files:
-    - src/main.zig@uvukztro
-    - src/frontmatter.zig@uvukztro
-    - src/scanner.zig@uvukztro
-    - src/vcs.zig@uvukztro
+    - src/main.zig@bd70482
+    - src/frontmatter.zig@bd70482
+    - src/scanner.zig@bd70482
+    - src/vcs.zig@bd70482
 ---
 
 # Drift
@@ -17,18 +17,23 @@ drift binds markdown specs to code and lints for staleness.
 
 When you change code without updating the specs that describe it, those specs become stale. Stale specs get loaded as context in future sessions and produce wrong code based on wrong descriptions. This compounds — each session that trusts a stale spec makes things worse. drift makes the anchor explicit and enforceable so this feedback loop breaks.
 
+## CRITICAL: never relink without reviewing
+
+`drift link` refreshes provenance — it tells drift "I've reviewed this code and the spec is accurate." If you relink without actually updating the spec prose to match the code change, you are lying to every future session that loads that spec. Read the stale report, understand what changed, update the prose, THEN relink.
+
 ## After you change code
 
 Check if any specs reference the files you touched:
 
 ```bash
-drift lint
+drift check
 ```
 
 If a spec is stale because of your change:
-1. Update the spec's prose to reflect what you changed
-2. Refresh provenance: `drift link <spec-path> <file-you-changed>`
-3. Verify: `drift lint`
+1. Read the blame info to understand what changed and why
+2. Update the spec's prose to reflect what you changed
+3. Refresh provenance: `drift link <spec-path> <file-you-changed>`
+4. Verify: `drift check`
 
 Do not skip this. Leaving a spec stale is worse than leaving it unwritten.
 
@@ -59,7 +64,7 @@ drift link docs/new-feature.md src/feature/types.ts#Config
 
 ## When you delete or rename code
 
-If a bound file is deleted or renamed, `drift lint` will report it as STALE with "file not found". Remove the stale anchor:
+If a bound file is deleted or renamed, `drift check` will report it as STALE with "file not found". Remove the stale anchor:
 
 ```bash
 drift unlink docs/auth.md src/auth/old-handler.ts
@@ -76,9 +81,9 @@ Update the spec prose to reflect the rename.
 
 ## When you refactor
 
-Refactors that move code between files or rename symbols can break multiple specs at once. Run `drift lint` after refactoring to find all affected specs, then update each one.
+Refactors that move code between files or rename symbols can break multiple specs at once. Run `drift check` after refactoring to find all affected specs, then update each one.
 
-## When drift lint fails in CI
+## When drift check fails in CI
 
 Someone changed bound code without updating specs. Read the lint output to see which specs are stale and why, update the spec prose, then `drift link` to refresh provenance.
 
@@ -102,7 +107,11 @@ The auth flow uses @./src/auth/provider.ts#AuthConfig for validation.
 
 ## Staleness
 
-`drift lint` exits 1 if any anchor is stale. Reasons:
+`drift check` exits 1 if any anchor is stale. For supported languages (TypeScript, Python, Rust, Go, Zig, Java), comparison is syntax-aware — formatting-only changes won't trigger staleness. Stale reports include git blame info (author, commit, message) so you know what changed and why.
+
+Reasons:
 - **changed after spec** — file/symbol content differs from provenance snapshot
 - **file not found** — bound file no longer exists
 - **symbol not found** — bound symbol no longer exists in the file
+
+`drift lint` is an alias for `drift check`.
