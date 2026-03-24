@@ -33,14 +33,14 @@ Reference: docs/DESIGN.md, docs/DECISIONS.md, docs/CLI.md, docs/RELEASING.md
 - Tagged unions for VCS dispatch (Git | Jj)
 - Comptime string maps for language detection (extension → grammar)
 - Shell out for VCS operations via `std.process.Child`
-- Tree-sitter queries loaded from `queries/<language>.scm` at comptime
+- Tree-sitter queries loaded from `src/queries/<language>.scm` at comptime
 
 ## Adding a Language
 
 1. Add grammar dependency to `build.zig.zon`
 2. Add grammar compilation to `build.zig` grammars array
 3. Add extern declaration + extension mapping in `src/parse/Language.zig`
-4. Write `queries/<language>.scm` with symbol capture patterns
+4. Write `src/queries/<language>.scm` with symbol capture patterns
 5. Add test fixture
 
 ## Adding a Command
@@ -55,7 +55,7 @@ Reference: docs/DESIGN.md, docs/DECISIONS.md, docs/CLI.md, docs/RELEASING.md
 
 - `PascalCase.zig` for struct files (file-is-the-struct)
 - `snake_case.zig` for non-struct modules
-- `queries/<language>.scm` for tree-sitter queries
+- `src/queries/<language>.scm` for tree-sitter queries
 
 ## Testing
 

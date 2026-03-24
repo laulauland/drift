@@ -15,121 +15,27 @@ pub const LanguageQuery = struct {
     query_source: []const u8,
 };
 
-// Tree-sitter query sources for symbol extraction, embedded as string literals.
-// These match the @name captures in the query patterns to resolve symbol anchors.
-const ts_query_typescript =
-    \\[
-    \\  (function_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (class_declaration
-    \\    name: (type_identifier) @name) @definition
-    \\  (type_alias_declaration
-    \\    name: (type_identifier) @name) @definition
-    \\  (interface_declaration
-    \\    name: (type_identifier) @name) @definition
-    \\  (enum_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (lexical_declaration
-    \\    (variable_declarator
-    \\      name: (identifier) @name)) @definition
-    \\]
-;
-
-const ts_query_python =
-    \\[
-    \\  (function_definition
-    \\    name: (identifier) @name) @definition
-    \\  (class_definition
-    \\    name: (identifier) @name) @definition
-    \\]
-;
-
-const ts_query_rust =
-    \\[
-    \\  (function_item
-    \\    name: (identifier) @name) @definition
-    \\  (struct_item
-    \\    name: (type_identifier) @name) @definition
-    \\  (enum_item
-    \\    name: (type_identifier) @name) @definition
-    \\  (trait_item
-    \\    name: (type_identifier) @name) @definition
-    \\  (type_item
-    \\    name: (type_identifier) @name) @definition
-    \\  (impl_item
-    \\    type: (type_identifier) @name) @definition
-    \\  (const_item
-    \\    name: (identifier) @name) @definition
-    \\  (static_item
-    \\    name: (identifier) @name) @definition
-    \\]
-;
-
-const ts_query_go =
-    \\[
-    \\  (function_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (method_declaration
-    \\    name: (field_identifier) @name) @definition
-    \\  (type_declaration
-    \\    (type_spec
-    \\      name: (type_identifier) @name)) @definition
-    \\  (const_declaration
-    \\    (const_spec
-    \\      name: (identifier) @name)) @definition
-    \\  (var_declaration
-    \\    (var_spec
-    \\      name: (identifier) @name)) @definition
-    \\]
-;
-
-const ts_query_zig_lang =
-    \\[
-    \\  (function_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (variable_declaration
-    \\    (identifier) @name) @definition
-    \\  (test_declaration
-    \\    (identifier) @name) @definition
-    \\]
-;
-
-const ts_query_java =
-    \\[
-    \\  (class_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (interface_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (method_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (enum_declaration
-    \\    name: (identifier) @name) @definition
-    \\  (record_declaration
-    \\    name: (identifier) @name) @definition
-    \\]
-;
-
 /// Map a file extension to a tree-sitter language and query source.
 pub fn languageForExtension(ext: []const u8) ?LanguageQuery {
     if (std.mem.eql(u8, ext, ".ts") or std.mem.eql(u8, ext, ".tsx") or
         std.mem.eql(u8, ext, ".js") or std.mem.eql(u8, ext, ".jsx"))
     {
-        return .{ .language = tree_sitter_typescript(), .query_source = ts_query_typescript };
+        return .{ .language = tree_sitter_typescript(), .query_source = @embedFile("queries/typescript.scm") };
     }
     if (std.mem.eql(u8, ext, ".py")) {
-        return .{ .language = tree_sitter_python(), .query_source = ts_query_python };
+        return .{ .language = tree_sitter_python(), .query_source = @embedFile("queries/python.scm") };
     }
     if (std.mem.eql(u8, ext, ".rs")) {
-        return .{ .language = tree_sitter_rust(), .query_source = ts_query_rust };
+        return .{ .language = tree_sitter_rust(), .query_source = @embedFile("queries/rust.scm") };
     }
     if (std.mem.eql(u8, ext, ".go")) {
-        return .{ .language = tree_sitter_go(), .query_source = ts_query_go };
+        return .{ .language = tree_sitter_go(), .query_source = @embedFile("queries/go.scm") };
     }
     if (std.mem.eql(u8, ext, ".zig")) {
-        return .{ .language = tree_sitter_zig(), .query_source = ts_query_zig_lang };
+        return .{ .language = tree_sitter_zig(), .query_source = @embedFile("queries/zig.scm") };
     }
     if (std.mem.eql(u8, ext, ".java")) {
-        return .{ .language = tree_sitter_java(), .query_source = ts_query_java };
+        return .{ .language = tree_sitter_java(), .query_source = @embedFile("queries/java.scm") };
     }
     return null;
 }
