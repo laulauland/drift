@@ -132,10 +132,6 @@ jobs:
 
 `fetch-depth: 0` is required — drift needs VCS history to compare content at provenance revisions. The setup action auto-detects platform, downloads the right binary from GitHub releases, and verifies its checksum before installing.
 
-## VCS support
-
-git. jj support is planned for when jj-native forges exist — until then, colocated jj repos use git provenance, which works in both local and CI environments.
-
 ## Development
 
 Requires Zig 0.15.2. The repo includes a `.tool-versions` file for [mise](https://mise.jdx.dev/) (or asdf). If you haven't already, [activate mise](https://mise.jdx.dev/getting-started.html#activate-mise) in your shell, then:
