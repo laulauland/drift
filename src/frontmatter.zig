@@ -320,6 +320,10 @@ fn linkCommentAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: 
             continue;
         }
 
+        if (in_files_section and trimmed.len == 0) {
+            continue;
+        }
+
         if (in_files_section and trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "- ")) {
             if (!found_existing and !wrote_anchor) {
                 try writer.writeAll("    - ");
@@ -1054,6 +1058,24 @@ test "linkAnchor adds to comment-based anchor" {
     defer allocator.free(result);
     try std.testing.expect(std.mem.indexOf(u8, result, "src/existing.ts") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "src/new.ts@abc") != null);
+}
+
+test "linkAnchor is idempotent for comment-based anchors" {
+    const allocator = std.testing.allocator;
+    const content =
+        "# Doc\n\n" ++
+        "<!-- drift:\n" ++
+        "  files:\n" ++
+        "    - src/existing.ts\n" ++
+        "-->\n";
+
+    const first = try linkAnchor(allocator, content, "src/new.ts@abc");
+    defer allocator.free(first);
+
+    const second = try linkAnchor(allocator, first, "src/new.ts@abc");
+    defer allocator.free(second);
+
+    try std.testing.expectEqualStrings(first, second);
 }
 
 test "linkAnchor preserves comment-based drift when unrelated frontmatter exists" {
