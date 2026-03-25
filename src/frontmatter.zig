@@ -435,7 +435,42 @@ pub fn linkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: []c
             const frontmatter = after_open[0..close_offset]; // text between the two ---
             const body_start = 4 + close_offset + 5; // skip opening "---\n" + frontmatter + "\n---\n"
 
-            // Process the frontmatter lines
+            var frontmatter_has_drift = false;
+            var frontmatter_lines = std.mem.splitScalar(u8, frontmatter, '\n');
+            while (frontmatter_lines.next()) |line| {
+                if (std.mem.eql(u8, line, "drift:") or std.mem.startsWith(u8, line, "drift:")) {
+                    frontmatter_has_drift = true;
+                    break;
+                }
+            }
+
+            if (!frontmatter_has_drift) {
+                if (hasCommentAnchors(content)) {
+                    return try linkCommentAnchor(allocator, content, anchor);
+                }
+
+                var output: std.ArrayList(u8) = .{};
+                defer output.deinit(allocator);
+                const writer = output.writer(allocator);
+
+                try writer.writeAll("---\n");
+                try writer.writeAll(frontmatter);
+                if (frontmatter.len > 0) {
+                    try writer.writeByte('\n');
+                }
+                try writer.writeAll("drift:\n");
+                try writer.writeAll("  files:\n");
+                try writer.print("    - {s}\n", .{anchor});
+                try writer.writeAll("---\n");
+
+                if (body_start <= content.len) {
+                    try writer.writeAll(content[body_start..]);
+                }
+
+                return try allocator.dupe(u8, output.items);
+            }
+
+            // Process the existing drift frontmatter lines
             var output: std.ArrayList(u8) = .{};
             defer output.deinit(allocator);
             const writer = output.writer(allocator);
@@ -443,12 +478,34 @@ pub fn linkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: []c
             try writer.writeAll("---\n");
 
             var found_existing = false;
-            var in_files_section = false;
             var wrote_anchor = false;
+            var in_drift_section = false;
+            var in_files_section = false;
+            var saw_files_section = false;
             var lines_iter = std.mem.splitScalar(u8, frontmatter, '\n');
 
             while (lines_iter.next()) |line| {
-                if (std.mem.startsWith(u8, line, "  files:")) {
+                const is_top_level = line.len > 0 and !std.mem.startsWith(u8, line, " ");
+
+                if (in_drift_section and !in_files_section and is_top_level) {
+                    if (!saw_files_section) {
+                        try writer.writeAll("  files:\n");
+                        try writer.print("    - {s}\n", .{anchor});
+                        wrote_anchor = true;
+                        saw_files_section = true;
+                    }
+                    in_drift_section = false;
+                }
+
+                if (std.mem.eql(u8, line, "drift:") or std.mem.startsWith(u8, line, "drift:")) {
+                    in_drift_section = true;
+                    try writer.writeAll(line);
+                    try writer.writeByte('\n');
+                    continue;
+                }
+
+                if (in_drift_section and std.mem.startsWith(u8, line, "  files:")) {
+                    saw_files_section = true;
                     in_files_section = true;
                     try writer.writeAll(line);
                     try writer.writeByte('\n');
@@ -460,21 +517,18 @@ pub fn linkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: []c
                     const existing_identity = anchorFileIdentity(existing_anchor);
 
                     if (std.mem.eql(u8, existing_identity, new_identity)) {
-                        // Replace this line with the new anchor
                         try writer.print("    - {s}\n", .{anchor});
                         found_existing = true;
                         wrote_anchor = true;
                         continue;
                     }
-                    // Keep the existing line
+
                     try writer.writeAll(line);
                     try writer.writeByte('\n');
                     continue;
                 }
 
-                // If we were in files section and hit a non-list line, we left it
                 if (in_files_section and !std.mem.startsWith(u8, line, "    - ")) {
-                    // Before leaving files section, append new anchor if not found
                     if (!found_existing and !wrote_anchor) {
                         try writer.print("    - {s}\n", .{anchor});
                         wrote_anchor = true;
@@ -486,14 +540,17 @@ pub fn linkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: []c
                 try writer.writeByte('\n');
             }
 
-            // If we were still in files section at end of frontmatter, append
             if (!wrote_anchor) {
-                try writer.print("    - {s}\n", .{anchor});
+                if (saw_files_section) {
+                    try writer.print("    - {s}\n", .{anchor});
+                } else {
+                    try writer.writeAll("  files:\n");
+                    try writer.print("    - {s}\n", .{anchor});
+                }
             }
 
             try writer.writeAll("---\n");
 
-            // Append the body
             if (body_start <= content.len) {
                 try writer.writeAll(content[body_start..]);
             }
@@ -599,12 +656,11 @@ pub const UnlinkResult = struct {
     removed: bool,
 };
 
-/// Core logic: given file content and an anchor, produce new file content with the anchor removed.
-/// Matches on file identity (stripping @provenance from both the existing anchor and the argument).
-pub fn unlinkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: []const u8) !UnlinkResult {
-    const target_identity = anchorFileIdentity(anchor);
-
-    // Must have YAML frontmatter to contain anchors
+fn unlinkFrontmatterAnchor(
+    allocator: std.mem.Allocator,
+    content: []const u8,
+    target_identity: []const u8,
+) !UnlinkResult {
     if (!std.mem.startsWith(u8, content, "---\n")) {
         return .{ .content = try allocator.dupe(u8, content), .removed = false };
     }
@@ -615,7 +671,20 @@ pub fn unlinkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: [
     };
 
     const frontmatter = after_open[0..close_offset];
-    const body_start = 4 + close_offset + 5; // skip opening "---\n" + frontmatter + "\n---\n"
+    const body_start = 4 + close_offset + 5;
+
+    var frontmatter_has_drift = false;
+    var frontmatter_lines = std.mem.splitScalar(u8, frontmatter, '\n');
+    while (frontmatter_lines.next()) |line| {
+        if (std.mem.eql(u8, line, "drift:") or std.mem.startsWith(u8, line, "drift:")) {
+            frontmatter_has_drift = true;
+            break;
+        }
+    }
+
+    if (!frontmatter_has_drift) {
+        return .{ .content = try allocator.dupe(u8, content), .removed = false };
+    }
 
     var output: std.ArrayList(u8) = .{};
     defer output.deinit(allocator);
@@ -624,11 +693,25 @@ pub fn unlinkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: [
     try writer.writeAll("---\n");
 
     var removed = false;
+    var in_drift_section = false;
     var in_files_section = false;
     var lines_iter = std.mem.splitScalar(u8, frontmatter, '\n');
 
     while (lines_iter.next()) |line| {
-        if (std.mem.startsWith(u8, line, "  files:")) {
+        const is_top_level = line.len > 0 and !std.mem.startsWith(u8, line, " ");
+
+        if (in_drift_section and !in_files_section and is_top_level) {
+            in_drift_section = false;
+        }
+
+        if (std.mem.eql(u8, line, "drift:") or std.mem.startsWith(u8, line, "drift:")) {
+            in_drift_section = true;
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            continue;
+        }
+
+        if (in_drift_section and std.mem.startsWith(u8, line, "  files:")) {
             in_files_section = true;
             try writer.writeAll(line);
             try writer.writeByte('\n');
@@ -640,13 +723,11 @@ pub fn unlinkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: [
             const existing_identity = anchorFileIdentity(existing_anchor);
 
             if (std.mem.eql(u8, existing_identity, target_identity)) {
-                // Skip this line (remove the anchor)
                 removed = true;
                 continue;
             }
         }
 
-        // Non-list-item line ends the files section
         if (in_files_section and !std.mem.startsWith(u8, line, "    - ")) {
             in_files_section = false;
         }
@@ -657,12 +738,101 @@ pub fn unlinkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: [
 
     try writer.writeAll("---\n");
 
-    // Append the body
     if (body_start <= content.len) {
         try writer.writeAll(content[body_start..]);
     }
 
     return .{ .content = try allocator.dupe(u8, output.items), .removed = removed };
+}
+
+fn unlinkCommentAnchor(
+    allocator: std.mem.Allocator,
+    content: []const u8,
+    target_identity: []const u8,
+) !UnlinkResult {
+    const marker = "<!-- drift:";
+
+    var output: std.ArrayList(u8) = .{};
+    defer output.deinit(allocator);
+    const writer = output.writer(allocator);
+
+    var removed = false;
+    var pos: usize = 0;
+    while (pos < content.len) {
+        const marker_offset = std.mem.indexOf(u8, content[pos..], marker) orelse {
+            try writer.writeAll(content[pos..]);
+            break;
+        };
+        const abs_marker_pos = pos + marker_offset;
+
+        if (isInCodeContext(content, abs_marker_pos)) {
+            try writer.writeAll(content[pos .. abs_marker_pos + marker.len]);
+            pos = abs_marker_pos + marker.len;
+            continue;
+        }
+
+        const block_start = abs_marker_pos + marker.len;
+        const close_offset = std.mem.indexOf(u8, content[block_start..], "-->") orelse {
+            try writer.writeAll(content[pos..]);
+            break;
+        };
+        const block_content = content[block_start .. block_start + close_offset];
+        const block_end = block_start + close_offset;
+
+        try writer.writeAll(content[pos..block_start]);
+
+        var in_files_section = false;
+        var lines_iter = std.mem.splitScalar(u8, block_content, '\n');
+        while (lines_iter.next()) |line| {
+            const trimmed = std.mem.trimLeft(u8, line, " \t");
+
+            if (std.mem.startsWith(u8, trimmed, "files:")) {
+                in_files_section = true;
+                try writer.writeAll(line);
+                try writer.writeByte('\n');
+                continue;
+            }
+
+            if (in_files_section and std.mem.startsWith(u8, trimmed, "- ")) {
+                const existing_anchor = trimmed["- ".len..];
+                if (std.mem.eql(u8, anchorFileIdentity(existing_anchor), target_identity)) {
+                    removed = true;
+                    continue;
+                }
+            }
+
+            if (in_files_section and trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "- ")) {
+                in_files_section = false;
+            }
+
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+        }
+
+        pos = block_end;
+    }
+
+    return .{ .content = try allocator.dupe(u8, output.items), .removed = removed };
+}
+
+/// Core logic: given file content and an anchor, produce new file content with the anchor removed.
+/// Matches on file identity (stripping @provenance from both the existing anchor and the argument).
+pub fn unlinkAnchor(allocator: std.mem.Allocator, content: []const u8, anchor: []const u8) !UnlinkResult {
+    const target_identity = anchorFileIdentity(anchor);
+
+    var result = try unlinkFrontmatterAnchor(allocator, content, target_identity);
+    errdefer allocator.free(result.content);
+
+    if (hasCommentAnchors(result.content)) {
+        const comment_result = try unlinkCommentAnchor(allocator, result.content, target_identity);
+        allocator.free(result.content);
+        result = .{
+            .content = comment_result.content,
+            .removed = result.removed or comment_result.removed,
+        };
+    }
+
+    return result;
 }
 
 // --- unit tests for unlinkAnchor ---
@@ -704,6 +874,41 @@ test "unlinkAnchor removes symbol anchor" {
     try std.testing.expect(std.mem.indexOf(u8, result.content, "src/lib.ts#Foo") == null);
 }
 
+test "unlinkAnchor removes comment-based anchor" {
+    const allocator = std.testing.allocator;
+    const content =
+        "# Doc\n\n" ++
+        "<!-- drift:\n" ++
+        "  files:\n" ++
+        "    - src/a.ts\n" ++
+        "    - src/b.ts\n" ++
+        "-->\n";
+    const result = try unlinkAnchor(allocator, content, "src/a.ts");
+    defer allocator.free(result.content);
+
+    try std.testing.expect(result.removed);
+    try std.testing.expect(std.mem.indexOf(u8, result.content, "src/a.ts") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.content, "src/b.ts") != null);
+}
+
+test "unlinkAnchor removes comment-based anchor with unrelated frontmatter" {
+    const allocator = std.testing.allocator;
+    const content =
+        "---\n" ++
+        "title: My Doc\n" ++
+        "---\n\n" ++
+        "<!-- drift:\n" ++
+        "  files:\n" ++
+        "    - src/a.ts\n" ++
+        "-->\n";
+    const result = try unlinkAnchor(allocator, content, "src/a.ts");
+    defer allocator.free(result.content);
+
+    try std.testing.expect(result.removed);
+    try std.testing.expect(std.mem.indexOf(u8, result.content, "title: My Doc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.content, "src/a.ts") == null);
+}
+
 // --- unit tests for linkAnchor ---
 
 test "linkAnchor adds anchor to empty files list" {
@@ -735,12 +940,66 @@ test "linkAnchor adds frontmatter to plain markdown" {
     try std.testing.expect(std.mem.indexOf(u8, result, "# Just a plain markdown file") != null);
 }
 
+test "linkAnchor preserves existing non-drift frontmatter" {
+    const allocator = std.testing.allocator;
+    const content =
+        "---\n" ++
+        "title: My Doc\n" ++
+        "tags:\n" ++
+        "  - docs\n" ++
+        "---\n" ++
+        "# Spec\n";
+    const result = try linkAnchor(allocator, content, "src/target.ts");
+    defer allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "title: My Doc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "tags:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "drift:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "  files:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "    - src/target.ts") != null);
+
+    var anchors = parseDriftSpec(allocator, result) orelse return error.TestUnexpectedResult;
+    defer {
+        for (anchors.items) |b| allocator.free(b);
+        anchors.deinit(allocator);
+    }
+    try std.testing.expectEqual(@as(usize, 1), anchors.items.len);
+    try std.testing.expectEqualStrings("src/target.ts", anchors.items[0]);
+}
+
+test "linkAnchor adds files section when drift exists without files" {
+    const allocator = std.testing.allocator;
+    const content =
+        "---\n" ++
+        "drift:\n" ++
+        "  owner: docs\n" ++
+        "title: My Doc\n" ++
+        "---\n" ++
+        "# Spec\n";
+    const result = try linkAnchor(allocator, content, "src/target.ts");
+    defer allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "  owner: docs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "title: My Doc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "  files:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "    - src/target.ts") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "title: My Doc\n  files:") == null);
+
+    var anchors = parseDriftSpec(allocator, result) orelse return error.TestUnexpectedResult;
+    defer {
+        for (anchors.items) |b| allocator.free(b);
+        anchors.deinit(allocator);
+    }
+    try std.testing.expectEqual(@as(usize, 1), anchors.items.len);
+    try std.testing.expectEqualStrings("src/target.ts", anchors.items[0]);
+}
+
 // --- unit tests for comment-based anchors ---
 
 test "parseDriftSpec parses comment-based anchors" {
     const allocator = std.testing.allocator;
     const content = "# My Doc\n\n<!-- drift:\n  files:\n    - src/main.zig\n    - src/vcs.zig\n-->\n\nSome content.\n";
-    const anchors = parseDriftSpec(allocator, content) orelse {
+    var anchors = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {
@@ -755,7 +1014,7 @@ test "parseDriftSpec parses comment-based anchors" {
 test "parseDriftSpec merges frontmatter and comment anchors" {
     const allocator = std.testing.allocator;
     const content = "---\ndrift:\n  files:\n    - src/a.ts\n---\n\n<!-- drift:\n  files:\n    - src/b.ts\n-->\n";
-    const anchors = parseDriftSpec(allocator, content) orelse {
+    var anchors = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {
@@ -768,7 +1027,7 @@ test "parseDriftSpec merges frontmatter and comment anchors" {
 test "parseDriftSpec parses comment with provenance" {
     const allocator = std.testing.allocator;
     const content = "<!-- drift:\n  files:\n    - src/main.zig@abc123\n-->\n";
-    const anchors = parseDriftSpec(allocator, content) orelse {
+    var anchors = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {
@@ -795,6 +1054,26 @@ test "linkAnchor adds to comment-based anchor" {
     defer allocator.free(result);
     try std.testing.expect(std.mem.indexOf(u8, result, "src/existing.ts") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "src/new.ts@abc") != null);
+}
+
+test "linkAnchor preserves comment-based drift when unrelated frontmatter exists" {
+    const allocator = std.testing.allocator;
+    const content =
+        "---\n" ++
+        "title: My Doc\n" ++
+        "---\n\n" ++
+        "<!-- drift:\n" ++
+        "  files:\n" ++
+        "    - src/existing.ts\n" ++
+        "-->\n\n" ++
+        "Body.\n";
+    const result = try linkAnchor(allocator, content, "src/new.ts@abc");
+    defer allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "title: My Doc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/existing.ts") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/new.ts@abc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "---\n\n<!-- drift:") != null);
 }
 
 test "relinkAllAnchors updates comment-based anchors" {
@@ -824,7 +1103,7 @@ test "parseCommentAnchors skips markers inside fenced code blocks" {
         \\-->
         \\```
     ;
-    const anchors = parseDriftSpec(allocator, content) orelse {
+    var anchors = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {

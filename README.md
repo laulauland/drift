@@ -84,9 +84,9 @@ If you don't want frontmatter visible on GitHub, use an HTML comment instead:
 
 ```
 drift check         Check all specs for staleness (exits 1 if stale)
-drift status        Show all specs and their anchors
+drift status        Show all spec anchors, including inline @./ refs
 drift link          Add an anchor to a spec (auto-appends provenance)
-drift unlink        Remove an anchor from a spec
+drift unlink        Remove an anchor from frontmatter or drift comments
 ```
 
 `drift lint` is an alias for `drift check`.

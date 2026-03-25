@@ -1,12 +1,12 @@
 ---
 drift:
   files:
-    - src/main.zig@d7d189a
+    - src/main.zig@4a6df2d
 ---
 
 # CLI Reference
 
-All commands support `--format json` for tool integration.
+`drift status` supports `--format json` for tool integration. Usage and command errors exit non-zero.
 
 ## drift lint
 
@@ -39,7 +39,7 @@ docs/project.md
 
 ## drift status
 
-Show all specs and their anchors without checking staleness.
+Show all specs and their anchors without checking staleness. This includes explicit frontmatter anchors, `<!-- drift: ... -->` comment anchors, and inline `@./path` references from the spec body.
 
 ```
 drift status [--format json]
@@ -87,7 +87,7 @@ If the spec file doesn't have `drift:` frontmatter yet, it's added. If the file 
 
 ## drift unlink
 
-Remove an anchor from a spec's frontmatter.
+Remove an anchor from a spec's YAML frontmatter or `<!-- drift: ... -->` comment block.
 
 ```
 drift unlink <spec-path> <file>

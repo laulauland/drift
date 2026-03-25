@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - src/main.zig@d7d189a
-    - src/frontmatter.zig@d7d189a
-    - src/scanner.zig@d7d189a
+    - src/main.zig@4a6df2d
+    - src/frontmatter.zig@4a6df2d
+    - src/scanner.zig@4a6df2d
     - src/symbols.zig@d7d189a
     - src/vcs.zig@d7d189a
 ---
