@@ -75,16 +75,16 @@ pub fn main() !void {
 
     switch (command) {
         .check, .lint => runLint(allocator, &stdout_w.interface, &stderr_w.interface) catch |err| {
-            stderr_w.interface.print("lint error: {s}\n", .{@errorName(err)}) catch {};
+            exitWithCommandError(&stderr_w.interface, "lint", err);
         },
         .status => runStatus(allocator, &stdout_w.interface, &stderr_w.interface) catch |err| {
-            stderr_w.interface.print("status error: {s}\n", .{@errorName(err)}) catch {};
+            exitWithCommandError(&stderr_w.interface, "status", err);
         },
         .link => runLink(allocator, &stdout_w.interface, &stderr_w.interface) catch |err| {
-            stderr_w.interface.print("link error: {s}\n", .{@errorName(err)}) catch {};
+            exitWithCommandError(&stderr_w.interface, "link", err);
         },
         .unlink => runUnlink(allocator, &stdout_w.interface, &stderr_w.interface) catch |err| {
-            stderr_w.interface.print("unlink error: {s}\n", .{@errorName(err)}) catch {};
+            exitWithCommandError(&stderr_w.interface, "unlink", err);
         },
         .help => printUsage(&stdout_w.interface),
     }
@@ -109,6 +109,50 @@ fn printUsage(w: *std.io.Writer) void {
     , .{}) catch {};
 }
 
+fn exitWithCommandError(stderr_w: *std.io.Writer, command: []const u8, err: anyerror) noreturn {
+    stderr_w.print("{s} error: {s}\n", .{ command, @errorName(err) }) catch {};
+    stderr_w.flush() catch {};
+    std.process.exit(1);
+}
+
+fn loadSpecsWithInlineAnchors(allocator: std.mem.Allocator, specs: *std.ArrayList(Spec)) !void {
+    try scanner.findSpecs(allocator, specs);
+
+    for (specs.items) |*spec| {
+        const content = try std.fs.cwd().readFileAlloc(allocator, spec.path, 1024 * 1024);
+        defer allocator.free(content);
+
+        var inline_anchors = scanner.parseInlineAnchors(allocator, content);
+        defer inline_anchors.deinit(allocator);
+
+        for (inline_anchors.items) |anchor| {
+            var already_bound = false;
+            for (spec.anchors.items) |existing| {
+                if (std.mem.eql(u8, existing, anchor)) {
+                    already_bound = true;
+                    break;
+                }
+            }
+
+            if (already_bound) {
+                allocator.free(anchor);
+                continue;
+            }
+
+            spec.anchors.append(allocator, anchor) catch |err| {
+                allocator.free(anchor);
+                return err;
+            };
+        }
+    }
+
+    std.mem.sort(Spec, specs.items, {}, struct {
+        fn lessThan(_: void, a: Spec, b: Spec) bool {
+            return std.mem.order(u8, a.path, b.path) == .lt;
+        }
+    }.lessThan);
+}
+
 fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *std.io.Writer) !void {
     var specs: std.ArrayList(Spec) = .{};
     defer {
@@ -116,41 +160,7 @@ fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
         specs.deinit(allocator);
     }
 
-    try scanner.findSpecs(allocator, &specs);
-
-    // Parse inline anchors from body content of each spec
-    for (specs.items) |*spec| {
-        const content = std.fs.cwd().readFileAlloc(allocator, spec.path, 1024 * 1024) catch continue;
-        defer allocator.free(content);
-
-        var inline_anchors = scanner.parseInlineAnchors(allocator, content);
-        for (inline_anchors.items) |ib| {
-            // Avoid duplicates
-            var already_bound = false;
-            for (spec.anchors.items) |existing| {
-                if (std.mem.eql(u8, existing, ib)) {
-                    already_bound = true;
-                    break;
-                }
-            }
-            if (!already_bound) {
-                spec.anchors.append(allocator, ib) catch {
-                    allocator.free(ib);
-                    continue;
-                };
-            } else {
-                allocator.free(ib);
-            }
-        }
-        inline_anchors.deinit(allocator);
-    }
-
-    // Sort specs by path for deterministic output
-    std.mem.sort(Spec, specs.items, {}, struct {
-        fn lessThan(_: void, a: Spec, b: Spec) bool {
-            return std.mem.order(u8, a.path, b.path) == .lt;
-        }
-    }.lessThan);
+    try loadSpecsWithInlineAnchors(allocator, &specs);
 
     // Get absolute cwd for VCS commands
     const cwd_path = try std.fs.cwd().realpathAlloc(allocator, ".");
@@ -170,7 +180,7 @@ fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
         // Get last commit/change that touched the spec file
         const spec_commit = vcs.getLastCommit(allocator, cwd_path, spec.path, detected_vcs) catch |err| {
             stderr_w.print("vcs error for {s}: {s}\n", .{ spec.path, @errorName(err) }) catch {};
-            continue;
+            return error.LintCheckFailed;
         };
         defer if (spec_commit) |c| allocator.free(c);
 
@@ -179,7 +189,7 @@ fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
         for (spec.anchors.items) |anchor| {
             const status = checkAnchor(allocator, cwd_path, anchor, spec_commit, detected_vcs) catch |err| {
                 stderr_w.print("error checking {s}: {s}\n", .{ anchor, @errorName(err) }) catch {};
-                continue;
+                return error.LintCheckFailed;
             };
             defer status.deinit(allocator);
 
@@ -452,14 +462,7 @@ fn runStatus(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *
         specs.deinit(allocator);
     }
 
-    try scanner.findSpecs(allocator, &specs);
-
-    // Sort specs by path for deterministic output
-    std.mem.sort(Spec, specs.items, {}, struct {
-        fn lessThan(_: void, a: Spec, b: Spec) bool {
-            return std.mem.order(u8, a.path, b.path) == .lt;
-        }
-    }.lessThan);
+    try loadSpecsWithInlineAnchors(allocator, &specs);
 
     if (format_json) {
         writeSpecsJson(stdout_w, specs.items);
@@ -494,17 +497,17 @@ fn writeSpecsText(w: *std.io.Writer, specs: []const Spec) void {
 }
 
 fn writeSpecsJson(w: *std.io.Writer, specs: []const Spec) void {
-    w.print("[", .{}) catch {};
-    for (specs, 0..) |spec, idx| {
-        if (idx > 0) w.print(",", .{}) catch {};
-        w.print("{{\"spec\":\"{s}\",\"files\":[", .{spec.path}) catch {};
-        for (spec.anchors.items, 0..) |anchor, bidx| {
-            if (bidx > 0) w.print(",", .{}) catch {};
-            w.print("\"{s}\"", .{anchor}) catch {};
-        }
-        w.print("]}}", .{}) catch {};
+    var json_w: std.json.Stringify = .{ .writer = w, .options = .{} };
+
+    json_w.beginArray() catch return;
+    for (specs) |spec| {
+        json_w.write(.{
+            .spec = spec.path,
+            .files = spec.anchors.items,
+        }) catch return;
     }
-    w.print("]\n", .{}) catch {};
+    json_w.endArray() catch return;
+    w.writeByte('\n') catch {};
 }
 
 fn runUnlink(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *std.io.Writer) !void {

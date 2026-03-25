@@ -75,3 +75,47 @@ test "unlink removes symbol anchor" {
     defer allocator.free(content);
     try helpers.expectNotContains(content, "src/lib.ts#Foo");
 }
+
+test "unlink removes comment-based anchor" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile(
+        "docs/spec.md",
+        "# Spec\n\n<!-- drift:\n  files:\n    - src/a.ts\n    - src/b.ts\n-->\n",
+    );
+    try repo.commit("add spec with comment-based anchors");
+
+    const result = try repo.runDrift(&.{ "unlink", "docs/spec.md", "src/a.ts" });
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 0);
+
+    const content = try repo.readFile("docs/spec.md");
+    defer allocator.free(content);
+    try helpers.expectNotContains(content, "src/a.ts");
+    try helpers.expectContains(content, "src/b.ts");
+}
+
+test "unlink removes comment-based anchor when unrelated frontmatter exists" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    try repo.writeFile(
+        "docs/spec.md",
+        "---\ntitle: My Doc\n---\n\n<!-- drift:\n  files:\n    - src/a.ts\n-->\n",
+    );
+    try repo.commit("add spec with unrelated frontmatter and comment anchors");
+
+    const result = try repo.runDrift(&.{ "unlink", "docs/spec.md", "src/a.ts" });
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 0);
+
+    const content = try repo.readFile("docs/spec.md");
+    defer allocator.free(content);
+    try helpers.expectContains(content, "title: My Doc");
+    try helpers.expectNotContains(content, "src/a.ts");
+}

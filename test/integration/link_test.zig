@@ -1,6 +1,18 @@
 const std = @import("std");
 const helpers = @import("helpers");
 
+test "link exits non-zero when required arguments are missing" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    const result = try repo.runDrift(&.{"link"});
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 1);
+    try helpers.expectContains(result.stderr, "usage: drift link <spec-path> [anchor]");
+}
+
 test "link adds new file anchor to spec" {
     const allocator = std.testing.allocator;
     var repo = try helpers.TempRepo.init(allocator);

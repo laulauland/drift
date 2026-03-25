@@ -207,5 +207,43 @@ pub fn isPathTerminator(c: u8) bool {
 }
 
 pub fn isTrailingPunctuation(c: u8) bool {
-    return c == '.' or c == ',' or c == ';' or c == ':' or c == ')' or c == ']' or c == '}' or c == '!' or c == '?';
+    return c == '.' or c == ',' or c == ';' or c == ':' or c == ')' or c == ']' or c == '}' or c == '!' or c == '?' or c == '"' or c == '\'' or c == '>';
+}
+
+// --- unit tests ---
+
+test "parseInlineAnchors strips surrounding quote punctuation" {
+    const allocator = std.testing.allocator;
+    const content =
+        \\# Spec
+        \\
+        \\See "@./src/main.ts" and '@./src/lib.ts#Foo'.
+        \\
+    ;
+
+    var anchors = parseInlineAnchors(allocator, content);
+    defer {
+        for (anchors.items) |anchor| allocator.free(anchor);
+        anchors.deinit(allocator);
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), anchors.items.len);
+    try std.testing.expectEqualStrings("src/main.ts", anchors.items[0]);
+    try std.testing.expectEqualStrings("src/lib.ts#Foo", anchors.items[1]);
+}
+
+test "updateInlineAnchors preserves surrounding quote punctuation" {
+    const allocator = std.testing.allocator;
+    const content =
+        \\# Spec
+        \\
+        \\See "@./src/main.ts" and '@./src/lib.ts#Foo'.
+        \\
+    ;
+
+    const result = try updateInlineAnchors(allocator, content, null, "abc123");
+    defer allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "\"@./src/main.ts@abc123\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "'@./src/lib.ts#Foo@abc123'") != null);
 }
