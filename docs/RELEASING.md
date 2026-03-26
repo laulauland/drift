@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - .github/workflows/release.yml@xxoutkyz
-    - .github/workflows/ci.yml@xxoutkyz
-    - cliff.toml@xxoutkyz
+    - .github/workflows/release.yml@2d3a4080
+    - .github/workflows/ci.yml@2d3a4080
+    - cliff.toml@2d3a4080
 ---
 
 # Releasing

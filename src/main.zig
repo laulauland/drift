@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const clap = @import("clap");
 const frontmatter = @import("frontmatter.zig");
 const scanner = @import("scanner.zig");
@@ -7,7 +8,7 @@ const vcs = @import("vcs.zig");
 
 const Spec = scanner.Spec;
 
-const version = "0.1.0";
+const version = build_options.version;
 
 const SubCommand = enum {
     check,

@@ -11,9 +11,22 @@ Any markdown file in your repo can declare anchors to code — specific files or
 curl -fsSL https://drift.fp.dev/install.sh | sh
 ```
 
+To install a specific version:
+
+```bash
+curl -fsSL https://drift.fp.dev/install.sh | sh -s -- --version vX.Y.Z
+```
+
+Or build from source:
+
+```bash
+zig build -Doptimize=ReleaseSafe --prefix ~/.local
+```
+
 ### Coding agent skill (Claude Code, Codex)
 
 ```bash
+curl -fsSL https://drift.fp.dev/install.sh | sh
 npx skills add fiberplane/drift
 ```
 
