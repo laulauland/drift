@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - .github/workflows/release.yml@2d3a4080
-    - .github/workflows/ci.yml@2d3a4080
-    - cliff.toml@2d3a4080
+    - .github/workflows/release.yml@520863d6
+    - .github/workflows/ci.yml@520863d6
+    - cliff.toml@520863d6
 ---
 
 # Releasing
@@ -43,6 +43,15 @@ Types `chore`, `style`, and `ci` are excluded from changelogs. Merge commits are
    - Generates release notes with git-cliff (grouped by Features, Bug Fixes, Documentation, Refactor)
    - Cross-compiles for all 4 targets with Zig 0.15.2
    - Creates a GitHub release with the generated notes, all tarballs, and matching `.sha256` checksum files attached
+   - Optionally dispatches `fiberplane/homebrew-tap` to open or refresh the Homebrew formula PR for that tag
+
+### Homebrew tap updates
+
+`fiberplane/homebrew-tap` now generates `Formula/drift.rb` directly from GitHub Releases metadata, so there is no manual template rendering or SHA input step.
+
+- The tap repo can sync on a schedule, via manual `workflow_dispatch`, or via `repository_dispatch` from the drift release workflow.
+- `.github/workflows/release.yml` sends that dispatch when the `HOMEBREW_TAP_TOKEN` secret is configured in `fiberplane/drift`.
+- If the secret is missing, releases still succeed; the tap can be updated by running its sync workflow manually or waiting for the next scheduled run.
 
 ### CHANGELOG.md
 
