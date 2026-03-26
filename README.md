@@ -7,6 +7,14 @@ Any markdown file in your repo can declare anchors to code — specific files or
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install fiberplane/tap/drift
+```
+
+### Shell installer
+
 ```bash
 curl -fsSL https://drift.fp.dev/install.sh | sh
 ```
