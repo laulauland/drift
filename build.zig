@@ -3,12 +3,16 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const version = b.option([]const u8, "version", "Drift version string") orelse "0.0.0-dev";
 
     // Dependencies
     const clap_dep = b.dependency("clap", .{});
 
     // Build tree-sitter C library from vendor sources
     const ts_module = buildTreeSitter(b, target, optimize);
+
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", version);
 
     // Root module
     const root_module = b.createModule(.{
@@ -21,6 +25,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "tree_sitter", .module = ts_module },
         },
     });
+    root_module.addOptions("build_options", build_options);
     linkGrammars(b, root_module);
 
     // Executable
