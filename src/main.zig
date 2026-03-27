@@ -170,12 +170,27 @@ fn runLint(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
     const detected_vcs = vcs.detectVcs();
     var has_issues = false;
 
+    // Get repo identity once for origin-qualified anchor filtering
+    const repo_identity = vcs.getRepoIdentity(allocator, cwd_path);
+    defer if (repo_identity) |ri| allocator.free(ri);
+
     for (specs.items) |spec| {
         stdout_w.print("{s}\n", .{spec.path}) catch {};
 
         if (spec.anchors.items.len == 0) {
             stdout_w.print("  ok\n", .{}) catch {};
             continue;
+        }
+
+        // Skip specs with a foreign origin
+        if (spec.origin) |origin| {
+            const is_local = if (repo_identity) |ri| std.mem.eql(u8, origin, ri) else false;
+            if (!is_local) {
+                for (spec.anchors.items) |anchor| {
+                    stdout_w.print("  SKIP   {s} (origin: {s})\n", .{ anchor, origin }) catch {};
+                }
+                continue;
+            }
         }
 
         // Get last commit/change that touched the spec file
@@ -566,6 +581,10 @@ fn writeSpecsText(w: *std.io.Writer, specs: []const Spec) void {
             if (spec.anchors.items.len == 1) "" else "s",
         }) catch {};
 
+        if (spec.origin) |origin| {
+            w.print("  origin: {s}\n", .{origin}) catch {};
+        }
+
         if (spec.anchors.items.len > 0) {
             w.print("  files:\n", .{}) catch {};
             for (spec.anchors.items) |anchor| {
@@ -584,10 +603,18 @@ fn writeSpecsJson(w: *std.io.Writer, specs: []const Spec) void {
 
     json_w.beginArray() catch return;
     for (specs) |spec| {
-        json_w.write(.{
-            .spec = spec.path,
-            .files = spec.anchors.items,
-        }) catch return;
+        if (spec.origin) |origin| {
+            json_w.write(.{
+                .spec = spec.path,
+                .origin = origin,
+                .files = spec.anchors.items,
+            }) catch return;
+        } else {
+            json_w.write(.{
+                .spec = spec.path,
+                .files = spec.anchors.items,
+            }) catch return;
+        }
     }
     json_w.endArray() catch return;
     w.writeByte('\n') catch {};
@@ -721,17 +748,18 @@ fn runLink(allocator: std.mem.Allocator, stdout_w: *std.io.Writer, stderr_w: *st
     } else {
         // Blanket mode: drift link <spec-path>
         // Compute per-anchor content signatures instead of a single VCS change ID
-        const parsed_anchors = frontmatter.parseDriftSpec(allocator, content);
-        defer if (parsed_anchors) |*anchors| {
-            var a = anchors.*;
+        const parsed_spec = frontmatter.parseDriftSpec(allocator, content);
+        defer if (parsed_spec) |*ps| {
+            var a = ps.anchors;
             for (a.items) |b| allocator.free(b);
             a.deinit(allocator);
+            if (ps.origin) |o| allocator.free(o);
         };
 
         var intermediate: []const u8 = try allocator.dupe(u8, content);
 
-        if (parsed_anchors) |anchors| {
-            for (anchors.items) |existing_anchor| {
+        if (parsed_spec) |drift_spec| {
+            for (drift_spec.anchors.items) |existing_anchor| {
                 const identity = frontmatter.anchorFileIdentity(existing_anchor);
                 const hash_pos = std.mem.indexOfScalar(u8, identity, '#');
                 const anchor_file_path = if (hash_pos) |pos| identity[0..pos] else identity;

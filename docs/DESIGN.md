@@ -1,11 +1,11 @@
 ---
 drift:
   files:
-    - src/main.zig@sig:d873ec9ee4847ab0
-    - src/frontmatter.zig@sig:418dbef4a977ea1d
-    - src/scanner.zig@sig:161bae32d2c984b8
+    - src/main.zig@sig:80171c2f3d2c2f4c
+    - src/frontmatter.zig@sig:ec04c25b0a6b05b2
+    - src/scanner.zig@sig:580c0f12170d4d35
     - src/symbols.zig@sig:a31cb9bf8bd80d64
-    - src/vcs.zig@sig:31d5ca6c615ea8dd
+    - src/vcs.zig@sig:1699bd9349c613a6
 ---
 
 # Design
@@ -58,6 +58,12 @@ Each anchor can optionally carry provenance — a content signature or VCS refer
 The `@provenance` suffix is optional. Bare paths still work. Different anchors can have different provenance since each file tracks its own change independently. There is no separate `changes:` list.
 
 `drift link` produces `@sig:` provenance by default. Content signatures are VCS-independent — they encode a fingerprint of the code itself, so staleness detection works without querying git history. Legacy `@<sha>` provenance is still supported for backward compatibility.
+
+### Origin-Qualified Anchors
+
+A spec can declare its origin repository via `origin: github:owner/repo` in the `drift:` section. When `drift lint` runs, it resolves the current repo's identity from `git remote get-url origin` and normalizes it to the same `github:owner/repo` format. If a spec's origin doesn't match the current repo, all its anchors are reported as `SKIP` — they belong to a different repository and can't be checked locally.
+
+This lets specs travel across repo boundaries (vendored docs, shared skill files, monorepo imports) without producing false STALE reports. Specs without an `origin:` field are always checked — origin qualification is opt-in.
 
 ### Symbol-Level Anchors
 

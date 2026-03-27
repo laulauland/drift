@@ -90,16 +90,32 @@ pub fn anchorFileIdentity(anchor: []const u8) []const u8 {
     return anchor;
 }
 
-/// Parse drift frontmatter from file content. Returns anchors list if this is a drift spec, null otherwise.
+/// Result of parsing a drift spec: anchors list plus optional origin qualifier.
+pub const DriftSpec = struct {
+    anchors: std.ArrayList([]const u8),
+    origin: ?[]const u8,
+};
+
+/// Internal parse result from sub-parsers.
+const ParseResult = struct {
+    anchors: std.ArrayList([]const u8),
+    origin: ?[]const u8,
+};
+
+/// Parse drift frontmatter from file content. Returns anchors list and origin if this is a drift spec, null otherwise.
 /// Checks both YAML frontmatter and HTML comment-based anchors, merging results.
-pub fn parseDriftSpec(allocator: std.mem.Allocator, content: []const u8) ?std.ArrayList([]const u8) {
+pub fn parseDriftSpec(allocator: std.mem.Allocator, content: []const u8) ?DriftSpec {
     var anchors: std.ArrayList([]const u8) = .{};
     var found_source = false;
+    var origin: ?[]const u8 = null;
 
     // 1. Parse YAML frontmatter anchors
     if (parseFrontmatterAnchors(allocator, content)) |fm_result| {
-        var fm_anchors = fm_result;
+        var fm_anchors = fm_result.anchors;
         found_source = true;
+        if (fm_result.origin) |o| {
+            if (origin == null) origin = o else allocator.free(o);
+        }
         for (fm_anchors.items) |b| {
             anchors.append(allocator, b) catch {
                 allocator.free(b);
@@ -110,8 +126,11 @@ pub fn parseDriftSpec(allocator: std.mem.Allocator, content: []const u8) ?std.Ar
 
     // 2. Parse HTML comment-based anchors
     if (parseCommentAnchors(allocator, content)) |comment_result| {
-        var comment_anchors = comment_result;
+        var comment_anchors = comment_result.anchors;
         found_source = true;
+        if (comment_result.origin) |o| {
+            if (origin == null) origin = o else allocator.free(o);
+        }
         for (comment_anchors.items) |b| {
             anchors.append(allocator, b) catch {
                 allocator.free(b);
@@ -123,14 +142,15 @@ pub fn parseDriftSpec(allocator: std.mem.Allocator, content: []const u8) ?std.Ar
     if (!found_source) {
         for (anchors.items) |b| allocator.free(b);
         anchors.deinit(allocator);
+        if (origin) |o| allocator.free(o);
         return null;
     }
 
-    return anchors;
+    return .{ .anchors = anchors, .origin = origin };
 }
 
 /// Parse anchors from YAML frontmatter (--- ... --- block).
-fn parseFrontmatterAnchors(allocator: std.mem.Allocator, content: []const u8) ?std.ArrayList([]const u8) {
+fn parseFrontmatterAnchors(allocator: std.mem.Allocator, content: []const u8) ?ParseResult {
     if (!std.mem.startsWith(u8, content, "---\n")) return null;
 
     const after_open = content[4..];
@@ -139,17 +159,35 @@ fn parseFrontmatterAnchors(allocator: std.mem.Allocator, content: []const u8) ?s
     const fm = after_open[0..close_offset];
 
     var has_drift = false;
+    var in_drift_section = false;
     var in_files_section = false;
     var anchors: std.ArrayList([]const u8) = .{};
+    var origin: ?[]const u8 = null;
 
     var lines_iter = std.mem.splitScalar(u8, fm, '\n');
     while (lines_iter.next()) |line| {
         if (std.mem.eql(u8, line, "drift:") or std.mem.startsWith(u8, line, "drift:")) {
             has_drift = true;
+            in_drift_section = true;
             continue;
         }
 
-        if (has_drift and std.mem.startsWith(u8, line, "  files:")) {
+        // Detect top-level key (not indented) — exits drift section
+        if (in_drift_section and line.len > 0 and !std.mem.startsWith(u8, line, " ")) {
+            in_drift_section = false;
+            in_files_section = false;
+        }
+
+        if (in_drift_section and std.mem.startsWith(u8, line, "  origin: ")) {
+            const value = line["  origin: ".len..];
+            if (value.len > 0) {
+                origin = allocator.dupe(u8, value) catch null;
+            }
+            in_files_section = false;
+            continue;
+        }
+
+        if (in_drift_section and std.mem.startsWith(u8, line, "  files:")) {
             in_files_section = true;
             continue;
         }
@@ -172,18 +210,20 @@ fn parseFrontmatterAnchors(allocator: std.mem.Allocator, content: []const u8) ?s
     if (!has_drift) {
         for (anchors.items) |b| allocator.free(b);
         anchors.deinit(allocator);
+        if (origin) |o| allocator.free(o);
         return null;
     }
 
-    return anchors;
+    return .{ .anchors = anchors, .origin = origin };
 }
 
 /// Parse anchors from `<!-- drift: ... -->` HTML comment blocks.
 /// Returns null if no comment-based anchors are found.
-fn parseCommentAnchors(allocator: std.mem.Allocator, content: []const u8) ?std.ArrayList([]const u8) {
+fn parseCommentAnchors(allocator: std.mem.Allocator, content: []const u8) ?ParseResult {
     const marker = "<!-- drift:";
     var anchors: std.ArrayList([]const u8) = .{};
     var found = false;
+    var origin: ?[]const u8 = null;
 
     var pos: usize = 0;
     while (pos < content.len) {
@@ -206,6 +246,15 @@ fn parseCommentAnchors(allocator: std.mem.Allocator, content: []const u8) ?std.A
         var lines_iter = std.mem.splitScalar(u8, block_content, '\n');
         while (lines_iter.next()) |line| {
             const trimmed = std.mem.trimLeft(u8, line, " \t");
+
+            if (std.mem.startsWith(u8, trimmed, "origin: ")) {
+                const value = trimmed["origin: ".len..];
+                if (value.len > 0 and origin == null) {
+                    origin = allocator.dupe(u8, value) catch null;
+                }
+                in_files_section = false;
+                continue;
+            }
 
             if (std.mem.startsWith(u8, trimmed, "files:")) {
                 in_files_section = true;
@@ -234,13 +283,13 @@ fn parseCommentAnchors(allocator: std.mem.Allocator, content: []const u8) ?std.A
         pos = block_start + close_offset + 3; // skip past "-->"
     }
 
-    if (!found) {
+    if (!found and origin == null) {
         for (anchors.items) |b| allocator.free(b);
         anchors.deinit(allocator);
         return null;
     }
 
-    return anchors;
+    return .{ .anchors = anchors, .origin = origin };
 }
 
 /// Check if content has a `<!-- drift: ... -->` comment block outside of code contexts.
@@ -958,13 +1007,14 @@ test "linkAnchor preserves existing non-drift frontmatter" {
     try std.testing.expect(std.mem.indexOf(u8, result, "  files:") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "    - src/target.ts") != null);
 
-    var anchors = parseDriftSpec(allocator, result) orelse return error.TestUnexpectedResult;
+    var spec = parseDriftSpec(allocator, result) orelse return error.TestUnexpectedResult;
     defer {
-        for (anchors.items) |b| allocator.free(b);
-        anchors.deinit(allocator);
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
     }
-    try std.testing.expectEqual(@as(usize, 1), anchors.items.len);
-    try std.testing.expectEqualStrings("src/target.ts", anchors.items[0]);
+    try std.testing.expectEqual(@as(usize, 1), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("src/target.ts", spec.anchors.items[0]);
 }
 
 test "linkAnchor adds files section when drift exists without files" {
@@ -985,13 +1035,14 @@ test "linkAnchor adds files section when drift exists without files" {
     try std.testing.expect(std.mem.indexOf(u8, result, "    - src/target.ts") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "title: My Doc\n  files:") == null);
 
-    var anchors = parseDriftSpec(allocator, result) orelse return error.TestUnexpectedResult;
+    var spec = parseDriftSpec(allocator, result) orelse return error.TestUnexpectedResult;
     defer {
-        for (anchors.items) |b| allocator.free(b);
-        anchors.deinit(allocator);
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
     }
-    try std.testing.expectEqual(@as(usize, 1), anchors.items.len);
-    try std.testing.expectEqualStrings("src/target.ts", anchors.items[0]);
+    try std.testing.expectEqual(@as(usize, 1), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("src/target.ts", spec.anchors.items[0]);
 }
 
 // --- unit tests for comment-based anchors ---
@@ -999,43 +1050,46 @@ test "linkAnchor adds files section when drift exists without files" {
 test "parseDriftSpec parses comment-based anchors" {
     const allocator = std.testing.allocator;
     const content = "# My Doc\n\n<!-- drift:\n  files:\n    - src/main.zig\n    - src/vcs.zig\n-->\n\nSome content.\n";
-    var anchors = parseDriftSpec(allocator, content) orelse {
+    var spec = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {
-        for (anchors.items) |b| allocator.free(b);
-        anchors.deinit(allocator);
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
     }
-    try std.testing.expectEqual(@as(usize, 2), anchors.items.len);
-    try std.testing.expectEqualStrings("src/main.zig", anchors.items[0]);
-    try std.testing.expectEqualStrings("src/vcs.zig", anchors.items[1]);
+    try std.testing.expectEqual(@as(usize, 2), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("src/main.zig", spec.anchors.items[0]);
+    try std.testing.expectEqualStrings("src/vcs.zig", spec.anchors.items[1]);
 }
 
 test "parseDriftSpec merges frontmatter and comment anchors" {
     const allocator = std.testing.allocator;
     const content = "---\ndrift:\n  files:\n    - src/a.ts\n---\n\n<!-- drift:\n  files:\n    - src/b.ts\n-->\n";
-    var anchors = parseDriftSpec(allocator, content) orelse {
+    var spec = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {
-        for (anchors.items) |b| allocator.free(b);
-        anchors.deinit(allocator);
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
     }
-    try std.testing.expectEqual(@as(usize, 2), anchors.items.len);
+    try std.testing.expectEqual(@as(usize, 2), spec.anchors.items.len);
 }
 
 test "parseDriftSpec parses comment with provenance" {
     const allocator = std.testing.allocator;
     const content = "<!-- drift:\n  files:\n    - src/main.zig@abc123\n-->\n";
-    var anchors = parseDriftSpec(allocator, content) orelse {
+    var spec = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {
-        for (anchors.items) |b| allocator.free(b);
-        anchors.deinit(allocator);
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
     }
-    try std.testing.expectEqual(@as(usize, 1), anchors.items.len);
-    try std.testing.expectEqualStrings("src/main.zig@abc123", anchors.items[0]);
+    try std.testing.expectEqual(@as(usize, 1), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("src/main.zig@abc123", spec.anchors.items[0]);
 }
 
 test "linkAnchor updates comment-based anchor" {
@@ -1107,13 +1161,76 @@ test "parseCommentAnchors skips markers inside fenced code blocks" {
         \\-->
         \\```
     ;
-    var anchors = parseDriftSpec(allocator, content) orelse {
+    var spec = parseDriftSpec(allocator, content) orelse {
         return error.TestUnexpectedResult;
     };
     defer {
-        for (anchors.items) |b| allocator.free(b);
-        anchors.deinit(allocator);
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
     }
-    try std.testing.expectEqual(@as(usize, 1), anchors.items.len);
-    try std.testing.expectEqualStrings("src/real.zig", anchors.items[0]);
+    try std.testing.expectEqual(@as(usize, 1), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("src/real.zig", spec.anchors.items[0]);
+}
+
+// --- unit tests for origin parsing ---
+
+test "parseDriftSpec parses origin from YAML frontmatter" {
+    const allocator = std.testing.allocator;
+    const content = "---\ndrift:\n  origin: github:owner/repo\n  files:\n    - src/main.zig\n---\n# Spec\n";
+    var spec = parseDriftSpec(allocator, content) orelse {
+        return error.TestUnexpectedResult;
+    };
+    defer {
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
+    }
+    try std.testing.expectEqual(@as(usize, 1), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("github:owner/repo", spec.origin.?);
+}
+
+test "parseDriftSpec returns null origin when not present" {
+    const allocator = std.testing.allocator;
+    const content = "---\ndrift:\n  files:\n    - src/main.zig\n---\n# Spec\n";
+    var spec = parseDriftSpec(allocator, content) orelse {
+        return error.TestUnexpectedResult;
+    };
+    defer {
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
+    }
+    try std.testing.expectEqual(@as(usize, 1), spec.anchors.items.len);
+    try std.testing.expect(spec.origin == null);
+}
+
+test "parseDriftSpec parses origin from comment-based anchors" {
+    const allocator = std.testing.allocator;
+    const content = "# Doc\n\n<!-- drift:\n  origin: github:acme/lib\n  files:\n    - src/main.zig\n-->\n";
+    var spec = parseDriftSpec(allocator, content) orelse {
+        return error.TestUnexpectedResult;
+    };
+    defer {
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
+    }
+    try std.testing.expectEqual(@as(usize, 1), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("github:acme/lib", spec.origin.?);
+}
+
+test "parseDriftSpec origin before files in frontmatter" {
+    const allocator = std.testing.allocator;
+    const content = "---\ndrift:\n  origin: github:test/proj\n  files:\n    - src/a.ts\n    - src/b.ts\n---\n";
+    var spec = parseDriftSpec(allocator, content) orelse {
+        return error.TestUnexpectedResult;
+    };
+    defer {
+        for (spec.anchors.items) |b| allocator.free(b);
+        spec.anchors.deinit(allocator);
+        if (spec.origin) |o| allocator.free(o);
+    }
+    try std.testing.expectEqual(@as(usize, 2), spec.anchors.items.len);
+    try std.testing.expectEqualStrings("github:test/proj", spec.origin.?);
 }

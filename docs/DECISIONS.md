@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - src/main.zig@sig:d873ec9ee4847ab0
+    - src/main.zig@sig:80171c2f3d2c2f4c
     - src/symbols.zig@sig:a31cb9bf8bd80d64
-    - src/vcs.zig@sig:31d5ca6c615ea8dd
+    - src/vcs.zig@sig:1699bd9349c613a6
 ---
 
 # Decisions
@@ -92,3 +92,11 @@ Content signatures solve several problems with VCS-based provenance:
 - The staleness check is a pure function of the file's content, not of VCS state. This makes drift behavior deterministic and easier to reason about.
 
 Legacy `@<sha>` provenance is still supported — `drift lint` detects the format and routes to the VCS-based comparison path. Migration is incremental: running `drift link <spec>` on any spec rewrites its anchors to `@sig:` format.
+
+## 10. Origin-qualified anchors
+
+Specs can declare `origin: github:owner/repo` in their `drift:` frontmatter section. At lint time, drift resolves the current repo's identity from `git remote get-url origin`, normalizes it to `github:owner/repo`, and compares. If a spec's origin doesn't match, its anchors are skipped — they belong to a different repository.
+
+This solves the problem of specs traveling across repository boundaries. Shared skill files, vendored documentation, and monorepo imports all contain anchors that point at files in the source repo, not the consuming repo. Without origin qualification, `drift lint` would report these as STALE (file not found) every time, creating noise. With it, foreign specs are silently skipped and only local specs are checked.
+
+Origin is opt-in. Specs without `origin:` are always checked. The normalized format (`github:owner/repo`) is derived from the git remote URL, handling SSH, HTTPS, and SSH URL formats uniformly.
