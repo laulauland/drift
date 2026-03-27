@@ -1,11 +1,11 @@
 ---
 drift:
   files:
-    - src/main.zig@2d3a4080
-    - src/frontmatter.zig@2d3a4080
-    - src/scanner.zig@2d3a4080
-    - src/symbols.zig@2d3a4080
-    - src/vcs.zig@2d3a4080
+    - src/main.zig@sig:d873ec9ee4847ab0
+    - src/frontmatter.zig@sig:418dbef4a977ea1d
+    - src/scanner.zig@sig:161bae32d2c984b8
+    - src/symbols.zig@sig:a31cb9bf8bd80d64
+    - src/vcs.zig@sig:31d5ca6c615ea8dd
 ---
 
 # Design
@@ -47,16 +47,17 @@ An anchor is a declared relationship between a spec and a code artifact. Two sou
 
 **Implicit anchors** — `@./path` and `@./path#Symbol` references in the spec body. Parsed from content, treated identically to explicit anchors for staleness detection.
 
-Each anchor can optionally carry provenance — a VCS reference (git SHA or jj change ID) recording which change last addressed this anchor. The syntax is `path@change`:
+Each anchor can optionally carry provenance — a content signature or VCS reference recording when the anchor was last verified. The syntax is `path@provenance`:
 
 - `src/auth/login.ts` — bound file, no provenance yet
-- `src/auth/login.ts@qpvuntsm` — bound file with provenance at change qpvuntsm
-- `src/auth/provider.ts#AuthConfig@qpvuntsm` — symbol anchor with provenance
-- In inline references: `@./src/auth/login.ts@qpvuntsm`
+- `src/auth/login.ts@sig:a1b2c3d4e5f6a7b8` — bound file with content signature
+- `src/auth/provider.ts#AuthConfig@sig:a1b2c3d4e5f6a7b8` — symbol anchor with content signature
+- `src/auth/login.ts@2d3a4080` — legacy format: bound file with VCS SHA provenance
+- In inline references: `@./src/auth/login.ts@sig:a1b2c3d4e5f6a7b8`
 
-The `@change` suffix is optional. Bare paths still work. Different anchors can have different provenance since each file tracks its own change independently. There is no separate `changes:` list.
+The `@provenance` suffix is optional. Bare paths still work. Different anchors can have different provenance since each file tracks its own change independently. There is no separate `changes:` list.
 
-In jj, change IDs are stable across rewrites. In git, SHAs may become unreachable after rebase, but staleness detection is VCS-history-based, not SHA-based, so this doesn't affect correctness.
+`drift link` produces `@sig:` provenance by default. Content signatures are VCS-independent — they encode a fingerprint of the code itself, so staleness detection works without querying git history. Legacy `@<sha>` provenance is still supported for backward compatibility.
 
 ### Symbol-Level Anchors
 
@@ -84,23 +85,25 @@ Specs can depend on other specs via `<!-- depends: path/to/other.md -->` comment
 
 ## Staleness Detection
 
-For each spec, drift determines staleness by comparing VCS history. Provenance is per-anchor: each anchor's `@change` suffix records the last change where that anchor was addressed.
+Provenance is per-anchor: each anchor's `@` suffix records when the anchor was last verified.
 
-1. For each anchor, determine its baseline — the anchor's provenance change if present, otherwise the last commit that modified the spec file
-2. Check the anchor against its baseline:
-   - **File-level**: for supported tree-sitter languages, parse the file and hash a normalized syntax fingerprint of the file; otherwise compare raw file content
-   - **Symbol-level**: parse the file, hash a normalized syntax fingerprint of the symbol, compare against the fingerprint at the baseline
-3. If any anchor has changed after its baseline, the spec is stale
+### Content signatures (`@sig:`) — primary format
 
-The baseline lookup is:
-```
-git show <baseline>:<bound-file>
-```
+`drift link` computes a normalized syntax fingerprint of each anchor's target and stores it as a 16-character hex string: `src/auth/login.ts@sig:a1b2c3d4e5f6a7b8`. At lint time, drift recomputes the fingerprint from the current file on disk and compares it to the stored value. If they match the anchor is fresh; if they differ it is stale.
 
-In jj:
-```
-jj file show -r <baseline> <bound-file>
-```
+Content signatures are VCS-independent — they work in fresh clones, shallow clones, and detached-HEAD states without querying git history. For supported tree-sitter languages, the fingerprint is based on the normalized syntax tree so formatting-only changes do not trigger staleness.
+
+### VCS SHAs (`@<sha>`) — legacy format
+
+Anchors with a plain git SHA or jj change ID as provenance (e.g. `src/auth/login.ts@2d3a4080`) use VCS-history-based comparison: drift retrieves the file at the baseline revision and compares its fingerprint against the current content. This format still works but `drift link` now produces `@sig:` provenance by default.
+
+### Detection algorithm
+
+1. For each anchor, determine its baseline provenance
+2. If provenance starts with `sig:` — recompute the fingerprint from disk and compare against the stored hex
+3. If provenance is a VCS ref — retrieve historical content via `git show <ref>:<file>`, compute fingerprints of both versions, compare
+4. If no provenance — fall back to the last commit that modified the spec file
+5. If any anchor has changed after its baseline, the spec is stale
 
 Because provenance is per-anchor, updating one anchor's change reference doesn't affect staleness detection for other anchors in the same spec. A spec with three anchors can have two fresh and one stale.
 

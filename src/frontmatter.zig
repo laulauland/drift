@@ -1086,6 +1086,10 @@ test "relinkAllAnchors updates comment-based anchors" {
     try std.testing.expect(std.mem.indexOf(u8, result, "@old") == null);
 }
 
+test "anchorFileIdentity handles sig: provenance prefix" {
+    try std.testing.expectEqualStrings("src/file.ts", anchorFileIdentity("src/file.ts@sig:abc123"));
+}
+
 test "parseCommentAnchors skips markers inside fenced code blocks" {
     const allocator = std.testing.allocator;
     const content =

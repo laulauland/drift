@@ -3,10 +3,10 @@ name: drift
 description: Drift spec-to-code anchor conventions. Use when editing code that is bound by drift specs, updating specs, working with drift frontmatter, or when drift check reports stale anchors.
 drift:
   files:
-    - src/main.zig@2d3a4080
-    - src/frontmatter.zig@2d3a4080
-    - src/scanner.zig@2d3a4080
-    - src/vcs.zig@2d3a4080
+    - src/main.zig@sig:d873ec9ee4847ab0
+    - src/frontmatter.zig@sig:418dbef4a977ea1d
+    - src/scanner.zig@sig:161bae32d2c984b8
+    - src/vcs.zig@sig:31d5ca6c615ea8dd
 ---
 
 # Drift
@@ -93,9 +93,10 @@ Frontmatter:
 ```yaml
 drift:
   files:
-    - src/auth/login.ts              # file-level
-    - src/auth/provider.ts#AuthConfig # symbol-level (AST node)
-    - src/auth/login.ts@abc123       # with provenance
+    - src/auth/login.ts                          # file-level, no provenance
+    - src/auth/provider.ts#AuthConfig             # symbol-level (AST node)
+    - src/auth/login.ts@sig:a1b2c3d4e5f6a7b8     # with content signature (primary)
+    - src/auth/login.ts@2d3a4080                  # with VCS SHA (legacy)
 ```
 
 Inline (in spec body):
@@ -103,7 +104,7 @@ Inline (in spec body):
 The auth flow uses @./src/auth/provider.ts#AuthConfig for validation.
 ```
 
-`drift link` stamps both frontmatter and inline anchors with provenance.
+`drift link` stamps both frontmatter and inline anchors with content signatures (`@sig:`). Content signatures encode a normalized syntax fingerprint of the target, so staleness detection works without querying VCS history.
 
 ## Staleness
 

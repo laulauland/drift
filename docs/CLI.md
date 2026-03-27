@@ -1,7 +1,7 @@
 ---
 drift:
   files:
-    - src/main.zig@2d3a4080
+    - src/main.zig@sig:d873ec9ee4847ab0
 ---
 
 # CLI Reference
@@ -63,27 +63,34 @@ docs/project.md (0 anchors)
 
 ## drift link
 
-Add an anchor to a spec's frontmatter. When no `@change` suffix is provided, drift auto-appends the current HEAD (git) or current change ID (jj) as provenance.
+Add or refresh anchors in a spec's frontmatter. `drift link` computes a content signature (`@sig:`) from the target file's current syntax fingerprint and uses it as provenance. If the target file doesn't exist or can't be fingerprinted, it falls back to the current HEAD SHA.
 
 ```
-drift link <spec-path> <file[@change]>
-drift link <spec-path> <file#Symbol[@change]>
+drift link <spec-path> <file[@provenance]>
+drift link <spec-path> <file#Symbol[@provenance]>
+drift link <spec-path>
 ```
 
-Edits the spec file's YAML frontmatter directly.
+**Targeted mode** — links a single anchor:
 
 ```
 $ drift link docs/auth.md src/auth/session.ts
-added src/auth/session.ts@qpvuntsm to docs/auth.md
+added src/auth/session.ts@sig:a1b2c3d4e5f6a7b8 to docs/auth.md
 
-$ drift link docs/auth.md src/auth/session.ts@qpvuntsm
-added src/auth/session.ts@qpvuntsm to docs/auth.md
-
-$ drift link docs/auth.md src/auth/provider.ts#AuthConfig@qpvuntsm
-added src/auth/provider.ts#AuthConfig@qpvuntsm to docs/auth.md
+$ drift link docs/auth.md src/auth/provider.ts#AuthConfig
+added src/auth/provider.ts#AuthConfig@sig:c3d4e5f6a7b8a1b2 to docs/auth.md
 ```
 
-If the spec file doesn't have `drift:` frontmatter yet, it's added. If the file is already bound, the provenance is updated in place.
+**Blanket mode** — refreshes all anchors in a spec:
+
+```
+$ drift link docs/auth.md
+relinked all anchors in docs/auth.md
+```
+
+Each anchor gets its own content signature computed from the current file on disk.
+
+If the spec file doesn't have `drift:` frontmatter yet, it's added. If the file is already bound, the provenance is updated in place. If you provide an explicit `@provenance` suffix, it is used as-is.
 
 ## drift unlink
 
