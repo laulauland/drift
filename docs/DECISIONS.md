@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - src/main.zig@2d3a4080
-    - src/symbols.zig@2d3a4080
-    - src/vcs.zig@2d3a4080
+    - src/main.zig@sig:d873ec9ee4847ab0
+    - src/symbols.zig@sig:a31cb9bf8bd80d64
+    - src/vcs.zig@sig:31d5ca6c615ea8dd
 ---
 
 # Decisions
@@ -80,3 +80,15 @@ The tree-sitter C library and zig-tree-sitter bindings are vendored (in `vendor/
 Grammar C sources are NOT vendored. They're declared as lazy dependencies in `build.zig.zon` and fetched by Zig's package manager. This avoids vendoring hundreds of kilobytes of C source per grammar.
 
 Starting with 6 languages: TypeScript, Python, Rust, Go, Zig, Java. More can be added by declaring the dependency and adding a `.scm` query file.
+
+## 9. Content signatures over VCS SHAs for provenance
+
+`drift link` now stores provenance as `@sig:<16-char-hex>` — a content-addressed fingerprint of the anchor's target — instead of `@<git-sha>`. The fingerprint is the same normalized syntax hash that staleness detection already computes (XxHash3 of the tree-sitter AST walk, or raw XxHash3 for unsupported languages).
+
+Content signatures solve several problems with VCS-based provenance:
+
+- Shallow clones and fresh clones work without history. `drift lint` with `@sig:` never shells out to git — it reads the file, hashes it, and compares. This makes CI faster and eliminates the `actions/checkout` depth footgun.
+- Detached HEAD, rebases, and force pushes don't invalidate provenance. A git SHA can become unreachable; a content fingerprint is always recomputable from the current file.
+- The staleness check is a pure function of the file's content, not of VCS state. This makes drift behavior deterministic and easier to reason about.
+
+Legacy `@<sha>` provenance is still supported — `drift lint` detects the format and routes to the VCS-based comparison path. Migration is incremental: running `drift link <spec>` on any spec rewrites its anchors to `@sig:` format.
