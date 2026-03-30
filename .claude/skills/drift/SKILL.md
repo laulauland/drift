@@ -104,7 +104,7 @@ Inline (in spec body):
 The auth flow uses @./src/auth/provider.ts#AuthConfig for validation.
 ```
 
-`drift link` stamps both frontmatter and inline anchors with content signatures (`@sig:`). Content signatures encode a normalized syntax fingerprint of the target, so staleness detection works without querying VCS history.
+`drift link` stamps both frontmatter and inline anchors with content signatures (`@sig:<hex>`). Content signatures are AST fingerprints of the target, so staleness detection works without querying VCS history. This means `drift link` works on uncommitted files — no need to commit first.
 
 ## Staleness
 

@@ -49,7 +49,7 @@ drift link docs/auth.md src/auth/login.ts
 drift link docs/auth.md src/auth/provider.ts#AuthConfig
 ```
 
-`drift link` adds the anchor to the spec's YAML frontmatter and auto-appends provenance (current git HEAD). You can also reference code inline — `@./src/auth/provider.ts#AuthConfig` in the spec body — and `drift link` will stamp those with provenance too.
+`drift link` adds the anchor to the spec's YAML frontmatter and stamps a content signature — an AST fingerprint of the target file or symbol. No git commit needed; it hashes what's on disk. You can also reference code inline — `@./src/auth/provider.ts#AuthConfig` in the spec body — and `drift link` will stamp those too.
 
 Check if specs are fresh:
 
@@ -71,33 +71,33 @@ After linking, your spec has frontmatter anchors and (optionally) inline referen
 ---
 drift:
   files:
-    - src/auth/login.ts@a1b2c3d4
-    - src/auth/provider.ts#AuthConfig@a1b2c3d4
+    - src/auth/login.ts@sig:e4f8a2c10b3d7890
+    - src/auth/provider.ts#AuthConfig@sig:1a2b3c4d5e6f7890
 ---
 
 # Auth Architecture
 
-Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@a1b2c3d4 ...
+Users authenticate via OAuth2. The validation flow uses @./src/auth/provider.ts#AuthConfig@sig:1a2b3c4d5e6f7890 ...
 ```
 
 Every anchor has three parts:
 
 ```
-src/auth/provider.ts   #AuthConfig   @a1b2c3d4
-└── file path ──────┘  └─ symbol ─┘  └ provenance ┘
+src/auth/provider.ts   #AuthConfig   @sig:1a2b3c4d5e6f7890
+└── file path ──────┘  └─ symbol ─┘  └──── signature ─────┘
 ```
 
 - **Path** — the file you're binding to, relative to the repo root.
 - **Symbol** — optional `#Name` suffix that narrows the anchor to a specific declaration (function, class, type). Only changes to that symbol trigger staleness.
-- **Provenance** — optional `@<git-sha>` recording which commit you last reviewed that code at. Stamped automatically by `drift link`. Per-anchor, so different files track independently.
+- **Signature** — content fingerprint stamped by `drift link`. An XxHash3 hash of the file or symbol's normalized AST, so staleness detection doesn't depend on VCS history. Rebasing, amending, or linking uncommitted files all work. Per-anchor, so different files track independently.
 
 If you don't want frontmatter visible on GitHub, use an HTML comment instead:
 
 ```markdown
 <!-- drift:
   files:
-    - src/auth/login.ts@a1b2c3d4
-    - src/auth/provider.ts#AuthConfig@a1b2c3d4
+    - src/auth/login.ts@sig:e4f8a2c10b3d7890
+    - src/auth/provider.ts#AuthConfig@sig:1a2b3c4d5e6f7890
 -->
 ```
 
@@ -114,7 +114,9 @@ drift unlink        Remove an anchor from frontmatter or drift comments
 
 ## How staleness works
 
-For each anchor, drift compares the bound code at the provenance revision against its current state. For supported languages (TypeScript, Python, Rust, Go, Zig, Java), comparison is syntax-aware — drift parses with tree-sitter and hashes a normalized AST fingerprint (node kinds + token text, no whitespace or position data). Reformatting won't trigger false positives. Symbol-level anchors (`#AuthConfig`) narrow this to just that declaration's subtree. Unsupported languages fall back to raw content comparison.
+Each anchor's `@sig:` records a fingerprint of the code at the time it was linked. `drift check` recomputes the fingerprint from the current file and compares. For supported languages (TypeScript, Python, Rust, Go, Zig, Java), comparison is syntax-aware — drift parses with tree-sitter and hashes a normalized AST fingerprint (node kinds + token text, no whitespace or position data). Reformatting won't trigger false positives. Symbol-level anchors (`#AuthConfig`) narrow this to just that declaration's subtree. Unsupported languages fall back to raw content comparison.
+
+No VCS history is needed for staleness detection — `drift check` works entirely from the stored signature and current file content.
 
 ```
 $ drift check
@@ -151,7 +153,7 @@ jobs:
       - run: drift check
 ```
 
-`fetch-depth: 0` is required — drift needs VCS history to compare content at provenance revisions. The setup action auto-detects platform, downloads the right binary from GitHub releases, and verifies its checksum before installing.
+`fetch-depth: 0` is recommended — drift uses VCS history for blame info on stale anchors and for legacy `@<git-sha>` provenance. With `@sig:` provenance (the default), staleness detection itself doesn't need history. The setup action auto-detects platform, downloads the right binary from GitHub releases, and verifies its checksum before installing.
 
 ## Development
 
