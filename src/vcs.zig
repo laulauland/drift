@@ -208,6 +208,64 @@ pub fn getBlameInfo(
     }
 }
 
+/// Normalize a GitHub remote URL to `github:owner/repo` format.
+/// Handles SSH (`git@github.com:owner/repo`), HTTPS (`https://github.com/owner/repo`),
+/// and SSH URL (`ssh://git@github.com/owner/repo`) formats.
+/// Strips `.git` suffix and trailing slashes. Returns null for non-GitHub URLs.
+pub fn normalizeGitHubUrl(allocator: std.mem.Allocator, url: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trimRight(u8, url, " \t\n\r/");
+
+    // Extract the owner/repo path from the URL
+    const path = blk: {
+        // SSH: git@github.com:owner/repo
+        if (std.mem.startsWith(u8, trimmed, "git@github.com:")) {
+            break :blk trimmed["git@github.com:".len..];
+        }
+        // HTTPS: https://github.com/owner/repo
+        if (std.mem.startsWith(u8, trimmed, "https://github.com/")) {
+            break :blk trimmed["https://github.com/".len..];
+        }
+        // SSH URL: ssh://git@github.com/owner/repo
+        if (std.mem.startsWith(u8, trimmed, "ssh://git@github.com/")) {
+            break :blk trimmed["ssh://git@github.com/".len..];
+        }
+        return null;
+    };
+
+    // Strip .git suffix
+    const clean = if (std.mem.endsWith(u8, path, ".git"))
+        path[0 .. path.len - 4]
+    else
+        path;
+
+    if (clean.len == 0) return null;
+
+    return std.fmt.allocPrint(allocator, "github:{s}", .{clean}) catch null;
+}
+
+/// Get the normalized repo identity by querying `git remote get-url origin`.
+/// Returns `github:owner/repo` or null if not a GitHub remote.
+pub fn getRepoIdentity(allocator: std.mem.Allocator, cwd_path: []const u8) ?[]const u8 {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "git", "remote", "get-url", "origin" },
+        .cwd = cwd_path,
+        .max_output_bytes = 4096,
+    }) catch return null;
+    defer allocator.free(result.stderr);
+    defer allocator.free(result.stdout);
+
+    switch (result.term) {
+        .Exited => |code| if (code != 0) return null,
+        else => return null,
+    }
+
+    const trimmed = std.mem.trimRight(u8, result.stdout, "\n\r ");
+    if (trimmed.len == 0) return null;
+
+    return normalizeGitHubUrl(allocator, trimmed);
+}
+
 /// Get the current change/commit ID (short form) for auto-provenance.
 pub fn getCurrentChangeId(allocator: std.mem.Allocator, cwd_path: []const u8, vcs: VcsKind) !?[]const u8 {
     const result = switch (vcs) {
@@ -241,4 +299,52 @@ pub fn getCurrentChangeId(allocator: std.mem.Allocator, cwd_path: []const u8, vc
     const id = try allocator.dupe(u8, trimmed);
     allocator.free(stdout);
     return id;
+}
+
+// --- unit tests ---
+
+test "normalizeGitHubUrl handles SSH format" {
+    const allocator = std.testing.allocator;
+    const result = normalizeGitHubUrl(allocator, "git@github.com:fiberplane/drift.git") orelse
+        return error.TestUnexpectedResult;
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("github:fiberplane/drift", result);
+}
+
+test "normalizeGitHubUrl handles HTTPS format" {
+    const allocator = std.testing.allocator;
+    const result = normalizeGitHubUrl(allocator, "https://github.com/fiberplane/drift.git") orelse
+        return error.TestUnexpectedResult;
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("github:fiberplane/drift", result);
+}
+
+test "normalizeGitHubUrl handles SSH URL format" {
+    const allocator = std.testing.allocator;
+    const result = normalizeGitHubUrl(allocator, "ssh://git@github.com/fiberplane/drift") orelse
+        return error.TestUnexpectedResult;
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("github:fiberplane/drift", result);
+}
+
+test "normalizeGitHubUrl strips trailing slash" {
+    const allocator = std.testing.allocator;
+    const result = normalizeGitHubUrl(allocator, "https://github.com/owner/repo/") orelse
+        return error.TestUnexpectedResult;
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("github:owner/repo", result);
+}
+
+test "normalizeGitHubUrl without .git suffix" {
+    const allocator = std.testing.allocator;
+    const result = normalizeGitHubUrl(allocator, "https://github.com/owner/repo") orelse
+        return error.TestUnexpectedResult;
+    defer allocator.free(result);
+    try std.testing.expectEqualStrings("github:owner/repo", result);
+}
+
+test "normalizeGitHubUrl returns null for non-GitHub URL" {
+    const allocator = std.testing.allocator;
+    const result = normalizeGitHubUrl(allocator, "https://gitlab.com/owner/repo.git");
+    try std.testing.expect(result == null);
 }

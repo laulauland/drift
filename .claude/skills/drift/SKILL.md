@@ -2,11 +2,12 @@
 name: drift
 description: Drift spec-to-code anchor conventions. Use when editing code that is bound by drift specs, updating specs, working with drift frontmatter, or when drift check reports stale anchors.
 drift:
+  origin: github:fiberplane/drift
   files:
-    - src/main.zig@sig:d873ec9ee4847ab0
-    - src/frontmatter.zig@sig:418dbef4a977ea1d
-    - src/scanner.zig@sig:161bae32d2c984b8
-    - src/vcs.zig@sig:31d5ca6c615ea8dd
+    - src/main.zig@sig:80171c2f3d2c2f4c
+    - src/frontmatter.zig@sig:ec04c25b0a6b05b2
+    - src/scanner.zig@sig:580c0f12170d4d35
+    - src/vcs.zig@sig:1699bd9349c613a6
 ---
 
 # Drift

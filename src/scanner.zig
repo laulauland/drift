@@ -4,11 +4,13 @@ const frontmatter = @import("frontmatter.zig");
 pub const Spec = struct {
     path: []const u8,
     anchors: std.ArrayList([]const u8),
+    origin: ?[]const u8 = null,
 
     pub fn deinit(self: *Spec, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
         for (self.anchors.items) |b| allocator.free(b);
         self.anchors.deinit(allocator);
+        if (self.origin) |o| allocator.free(o);
     }
 };
 
@@ -34,10 +36,11 @@ pub fn findSpecs(allocator: std.mem.Allocator, specs: *std.ArrayList(Spec)) !voi
         };
         defer allocator.free(content);
 
-        if (frontmatter.parseDriftSpec(allocator, content)) |anchors| {
+        if (frontmatter.parseDriftSpec(allocator, content)) |drift_spec| {
             try specs.append(allocator, .{
                 .path = file_path,
-                .anchors = anchors,
+                .anchors = drift_spec.anchors,
+                .origin = drift_spec.origin,
             });
         } else {
             allocator.free(file_path);

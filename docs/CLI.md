@@ -1,7 +1,7 @@
 ---
 drift:
   files:
-    - src/main.zig@sig:d873ec9ee4847ab0
+    - src/main.zig@sig:80171c2f3d2c2f4c
 ---
 
 # CLI Reference
@@ -34,8 +34,13 @@ docs/project.md
   STALE   src/core/old-module.ts
           file not found
 
+vendor/shared-skill.md
+  SKIP   src/main.rs (origin: github:acme/other-repo)
+
 2 specs stale, 1 ok
 ```
+
+Specs with an `origin:` field that doesn't match the current repo are skipped — their anchors reference files in a different repository.
 
 ## drift status
 
