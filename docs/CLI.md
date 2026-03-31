@@ -1,22 +1,22 @@
 ---
 drift:
   files:
-    - src/main.zig@sig:80171c2f3d2c2f4c
+    - src/main.zig@sig:1f0ab611cebf2ea0
 ---
 
 # CLI Reference
 
 `drift status` supports `--format json` for tool integration. Usage and command errors exit non-zero.
 
-## drift lint
+## drift check / drift lint
 
-Check all specs for staleness. The primary command. Exits 1 if any anchor is stale.
+Check all specs for staleness. The primary command. Exits 1 if any anchor is stale. `drift lint` is an alias.
 
 ```
-drift lint [--format json]
+drift check
 ```
 
-Scans the repo for markdown files with `drift:` frontmatter. For each spec, checks if any bound file was modified after the spec. Reports stale anchors with reasons.
+Scans the repo for git-tracked markdown files with `drift:` frontmatter or `<!-- drift: ... -->` HTML comments. For each spec, checks if any bound file was modified after the spec. Reports stale anchors with reasons.
 
 ```
 $ drift lint
@@ -44,7 +44,7 @@ Specs with an `origin:` field that doesn't match the current repo are skipped â€
 
 ## drift status
 
-Show all specs and their anchors without checking staleness. This includes explicit frontmatter anchors, `<!-- drift: ... -->` comment anchors, and inline `@./path` references from the spec body.
+Show all specs and their anchors without checking staleness. This includes explicit frontmatter anchors, `<!-- drift: ... -->` HTML comment anchors, and inline `@./path` references from the spec body.
 
 ```
 drift status [--format json]
@@ -99,7 +99,7 @@ If the spec file doesn't have `drift:` frontmatter yet, it's added. If the file 
 
 ## drift unlink
 
-Remove an anchor from a spec's YAML frontmatter or `<!-- drift: ... -->` comment block.
+Remove an anchor from a spec's YAML frontmatter or `<!-- drift: ... -->` HTML comment block.
 
 ```
 drift unlink <spec-path> <file>

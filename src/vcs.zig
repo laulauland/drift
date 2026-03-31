@@ -301,6 +301,83 @@ pub fn getCurrentChangeId(allocator: std.mem.Allocator, cwd_path: []const u8, vc
     return id;
 }
 
+/// Persistent `git cat-file --batch` process for fetching historical file
+/// content without spawning a new process per query.
+pub const GitCatFile = struct {
+    child: std.process.Child,
+    read_buf: []u8,
+    stdout_reader: std.fs.File.Reader,
+    allocator: std.mem.Allocator,
+
+    const read_buf_size = 8192;
+
+    pub fn init(allocator: std.mem.Allocator, cwd_path: []const u8) !GitCatFile {
+        const read_buf = try allocator.alloc(u8, read_buf_size);
+        errdefer allocator.free(read_buf);
+
+        var child = std.process.Child.init(
+            &.{ "git", "cat-file", "--batch" },
+            allocator,
+        );
+        child.cwd = cwd_path;
+        child.stdin_behavior = .Pipe;
+        child.stdout_behavior = .Pipe;
+        child.stderr_behavior = .Ignore;
+        try child.spawn();
+
+        var result: GitCatFile = .{
+            .child = child,
+            .read_buf = read_buf,
+            .stdout_reader = undefined,
+            .allocator = allocator,
+        };
+        result.stdout_reader = result.child.stdout.?.readerStreaming(result.read_buf);
+        return result;
+    }
+
+    /// Fetch a blob from git's object store. Returns file content at the given
+    /// revision, or null if the object doesn't exist.
+    pub fn getContent(self: *GitCatFile, allocator: std.mem.Allocator, revision: []const u8, file_path: []const u8) !?[]const u8 {
+        const stdin = self.child.stdin orelse return error.BrokenPipe;
+
+        stdin.writeAll(revision) catch return null;
+        stdin.writeAll(":") catch return null;
+        stdin.writeAll(file_path) catch return null;
+        stdin.writeAll("\n") catch return null;
+
+        const header = self.stdout_reader.interface.takeDelimiterExclusive('\n') catch return null;
+
+        if (std.mem.endsWith(u8, header, " missing")) {
+            return null;
+        }
+
+        const last_space = std.mem.lastIndexOfScalar(u8, header, ' ') orelse return null;
+        const size = std.fmt.parseInt(usize, header[last_space + 1 ..], 10) catch return null;
+
+        const content = try allocator.alloc(u8, size);
+        errdefer allocator.free(content);
+
+        self.stdout_reader.interface.readSliceAll(content) catch {
+            allocator.free(content);
+            return null;
+        };
+
+        // Consume trailing newline after blob content
+        _ = self.stdout_reader.interface.takeByte() catch {};
+
+        return content;
+    }
+
+    pub fn deinit(self: *GitCatFile) void {
+        if (self.child.stdin) |stdin| {
+            stdin.close();
+            self.child.stdin = null;
+        }
+        _ = self.child.wait() catch {};
+        self.allocator.free(self.read_buf);
+    }
+};
+
 // --- unit tests ---
 
 test "normalizeGitHubUrl handles SSH format" {

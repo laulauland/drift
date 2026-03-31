@@ -45,9 +45,9 @@ Reference: docs/DESIGN.md, docs/DECISIONS.md, docs/CLI.md, docs/RELEASING.md
 
 ## Adding a Command
 
-1. Create `src/commands/<name>.zig` with zig-clap params
-2. Add to SubCommand enum in `src/main.zig`
-3. Add dispatch case in main switch
+1. Create `src/commands/<name>.zig` with a `pub fn run(...)` entry point
+2. Add clap params and SubCommand variant in `src/main.zig`
+3. Add dispatch case in main switch, calling `<name>.run(...)`
 4. Support `--format json` for tool integration
 5. Add integration test
 

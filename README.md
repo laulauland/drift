@@ -166,7 +166,7 @@ jobs:
       - run: drift check
 ```
 
-`fetch-depth: 0` is recommended — drift uses VCS history for blame info on stale anchors and for legacy `@<git-sha>` provenance. With `@sig:` provenance (the default), staleness detection itself doesn't need history. The setup action auto-detects platform, downloads the right binary from GitHub releases, and verifies its checksum before installing.
+`fetch-depth: 0` is recommended — drift uses VCS history for blame info on stale anchors. With `@sig:` provenance (the default), staleness detection itself doesn't need history. The setup action auto-detects platform, downloads the right binary from GitHub releases, and verifies its checksum before installing.
 
 ## Development
 

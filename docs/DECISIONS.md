@@ -1,9 +1,9 @@
 ---
 drift:
   files:
-    - src/main.zig@sig:80171c2f3d2c2f4c
-    - src/symbols.zig@sig:a31cb9bf8bd80d64
-    - src/vcs.zig@sig:1699bd9349c613a6
+    - src/main.zig@sig:1f0ab611cebf2ea0
+    - src/symbols.zig@sig:1f41e745e5e32c2d
+    - src/vcs.zig@sig:af1279e1afd6b10d
 ---
 
 # Decisions
@@ -16,15 +16,15 @@ The previous drift implementation was TypeScript/Bun with the Effect ecosystem. 
 - drift is a lint tool. It should be fast enough to run as a pre-commit hook with no perceptible delay. Zig produces a single static binary with predictable performance.
 - drift's scope shrank significantly during redesign. The execution engine, build artifacts, server, and UI were all removed. What remains (parse markdown, resolve symbols, query VCS, format output) is ~2k lines of Zig.
 
-## 2. On-demand parsing, no index
+## 2. On-demand parsing, no persistent index
 
-drift knows exactly which files it cares about — they're declared in spec frontmatter and `@` imports. It parses only those files, only when checking them. A lint run that touches 20 files does 20 tree-sitter parses. No index, no cache, no invalidation logic.
+drift knows exactly which files it cares about — they're declared in spec frontmatter, `<!-- drift: ... -->` comments, and `@./` inline references. It parses only those files, only when checking them. A lint run that touches 20 files does 20 tree-sitter parses. No persistent index, no disk cache, no invalidation logic.
 
-This keeps the tool stateless. Every `drift lint` run starts clean, reads specs, resolves anchors, queries VCS, reports. Nothing to get stale except the specs themselves.
+Within a single lint run, file content and historical versions are cached in memory (`FileCache`) and VCS queries use a persistent `git cat-file --batch` subprocess (`GitCatFile`). These are per-run optimizations — nothing is written to disk. Every `drift lint` run starts clean, reads specs, resolves anchors, queries VCS, reports. Nothing to get stale except the specs themselves.
 
 ## 3. Unified anchor syntax with inline provenance
 
-Anchors and provenance live together in the spec file's YAML frontmatter using the `file@change` syntax, not in separate `files:` and `changes:` lists. Each anchor carries its own provenance as an `@change` suffix (e.g. `src/auth/login.ts@qpvuntsm`). The spec file is self-contained — its anchors, dependencies, and provenance are all in one place.
+Anchors and provenance live together in the spec file using the `file@change` syntax, not in separate `files:` and `changes:` lists. Each anchor carries its own provenance as an `@change` suffix (e.g. `src/auth/login.ts@sig:a1b2c3d4e5f6a7b8`). Anchors can appear in YAML frontmatter or in `<!-- drift: ... -->` HTML comments (for specs where visible frontmatter is undesirable). The spec file is self-contained — its anchors, dependencies, and provenance are all in one place.
 
 This design means provenance is per-anchor rather than per-spec. When an agent updates code for one anchor, it stamps just that anchor's change reference without affecting others. A spec with three anchors can have two fresh and one stale, and the `@change` suffix makes it immediately visible which anchors have been addressed.
 
@@ -61,11 +61,11 @@ File-level anchors remain the default. Symbol-level is opt-in for precision wher
 
 ## 6. Specs live anywhere, not in a special directory
 
-Early designs had specs in `.drift/nodes/`. The final design allows any markdown file in the repo to be a drift spec by adding `drift:` frontmatter.
+Early designs had specs in `.drift/nodes/`. The final design allows any markdown file in the repo to be a drift spec by adding `drift:` frontmatter or a `<!-- drift: ... -->` HTML comment.
 
-This means existing documentation can be incrementally adopted. You don't move files into a special directory — you add frontmatter to docs you already have. The `.drift/` directory exists only for optional configuration.
+This means existing documentation can be incrementally adopted. You don't move files into a special directory — you add frontmatter or a drift comment to docs you already have. The `.drift/` directory exists only for optional configuration.
 
-Discovery is by scanning — drift walks the repo looking for markdown files with the frontmatter marker. This is fast because it only needs to read the first few lines of each file (frontmatter is at the top).
+Discovery is by scanning — drift lists all git-tracked markdown files (via `git ls-files -z`) and checks each for drift markers. This is fast because it only needs to parse frontmatter and scan for comment markers.
 
 ## 7. git and jj support, auto-detected
 

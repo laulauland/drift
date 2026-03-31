@@ -1,6 +1,8 @@
 const std = @import("std");
 const ts = @import("tree_sitter");
 
+const Allocator = std.mem.Allocator;
+
 // --- tree-sitter language externs ---
 
 extern fn tree_sitter_typescript() callconv(.c) *const ts.Language;
@@ -39,6 +41,50 @@ pub fn languageForExtension(ext: []const u8) ?LanguageQuery {
     }
     return null;
 }
+
+/// Reused parser + compiled query per language for lint runs (avoids N× query compile).
+pub const ParserCache = struct {
+    map: std.AutoHashMap(usize, CachedParser),
+
+    pub const CachedParser = struct {
+        parser: *ts.Parser,
+        query: *ts.Query,
+    };
+
+    pub fn init(allocator: Allocator) ParserCache {
+        return .{ .map = std.AutoHashMap(usize, CachedParser).init(allocator) };
+    }
+
+    pub fn deinit(self: *ParserCache) void {
+        var it = self.map.valueIterator();
+        while (it.next()) |cp| {
+            cp.parser.destroy();
+            cp.query.destroy();
+        }
+        self.map.deinit();
+    }
+
+    fn getOrPut(self: *ParserCache, lq: LanguageQuery) !*CachedParser {
+        const key = @intFromPtr(lq.language);
+        const gop = try self.map.getOrPut(key);
+        if (!gop.found_existing) {
+            const parser = ts.Parser.create();
+            parser.setLanguage(lq.language) catch {
+                parser.destroy();
+                _ = self.map.remove(key);
+                return error.SetLanguageFailed;
+            };
+            var err_offset: u32 = 0;
+            const query = ts.Query.create(lq.language, lq.query_source, &err_offset) catch {
+                parser.destroy();
+                _ = self.map.remove(key);
+                return error.QueryCreateFailed;
+            };
+            gop.value_ptr.* = .{ .parser = parser, .query = query };
+        }
+        return gop.value_ptr;
+    }
+};
 
 fn findMatchingDefinitionNode(query: *const ts.Query, root: ts.Node, source: []const u8, target_symbol: []const u8) ?ts.Node {
     const cursor = ts.QueryCursor.create();
@@ -170,4 +216,63 @@ pub fn extractSymbolContent(
 /// Returns true if the symbol is found, false otherwise.
 pub fn resolveSymbolWithTreeSitter(source: []const u8, lang_query: LanguageQuery, target_symbol: []const u8) bool {
     return fingerprintSymbolSyntax(source, lang_query, target_symbol) != null;
+}
+
+pub fn fingerprintFileSyntaxCached(cache: *ParserCache, source: []const u8, lq: LanguageQuery) ?u64 {
+    const cp = cache.getOrPut(lq) catch return null;
+    const tree = cp.parser.parseString(source, null) orelse return null;
+    defer tree.destroy();
+    return fingerprintNodeSyntax(source, tree.rootNode());
+}
+
+pub fn fingerprintSymbolSyntaxCached(cache: *ParserCache, source: []const u8, lq: LanguageQuery, target_symbol: []const u8) ?u64 {
+    const cp = cache.getOrPut(lq) catch return null;
+    const tree = cp.parser.parseString(source, null) orelse return null;
+    defer tree.destroy();
+    const definition_node = findMatchingDefinitionNode(cp.query, tree.rootNode(), source, target_symbol) orelse return null;
+    return fingerprintNodeSyntax(source, definition_node);
+}
+
+pub fn resolveSymbolWithTreeSitterCached(cache: *ParserCache, source: []const u8, lang_query: LanguageQuery, target_symbol: []const u8) bool {
+    return fingerprintSymbolSyntaxCached(cache, source, lang_query, target_symbol) != null;
+}
+
+/// Compute a fingerprint for a file or symbol, dispatching to the appropriate
+/// tree-sitter language when available and falling back to raw XxHash3.
+pub fn computeFingerprint(content: []const u8, file_path: []const u8, symbol_name: ?[]const u8) ?u64 {
+    const ext = std.fs.path.extension(file_path);
+    if (symbol_name) |sym| {
+        const lang_query = languageForExtension(ext) orelse return null;
+        return fingerprintSymbolSyntax(content, lang_query, sym);
+    }
+    if (languageForExtension(ext)) |lang_query| {
+        return fingerprintFileSyntax(content, lang_query);
+    }
+    var hasher = std.hash.XxHash3.init(0);
+    hasher.update(content);
+    return hasher.final();
+}
+
+/// Read a file from disk, compute its fingerprint, and return a `sig:<hex>` string.
+/// Returns null if the file can't be read or the fingerprint can't be computed.
+pub fn computeContentSig(allocator: std.mem.Allocator, file_path: []const u8, symbol_name: ?[]const u8) ?[]const u8 {
+    const content = std.fs.cwd().readFileAlloc(allocator, file_path, 1024 * 1024) catch return null;
+    defer allocator.free(content);
+
+    const fingerprint = computeFingerprint(content, file_path, symbol_name) orelse return null;
+    return std.fmt.allocPrint(allocator, "sig:{x:0>16}", .{fingerprint}) catch return null;
+}
+
+test "fingerprintFileSyntaxCached works for zig source" {
+    const allocator = std.testing.allocator;
+    const source = "const std = @import(\"std\");\npub fn main() void {}\n";
+    var cache = ParserCache.init(allocator);
+    defer cache.deinit();
+    const lq = languageForExtension(".zig") orelse return error.TestUnexpectedResult;
+    const fp = fingerprintFileSyntaxCached(&cache, source, lq);
+    try std.testing.expect(fp != null);
+
+    const fp_non_cached = fingerprintFileSyntax(source, lq);
+    try std.testing.expect(fp_non_cached != null);
+    try std.testing.expectEqual(fp.?, fp_non_cached.?);
 }

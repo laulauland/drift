@@ -1,5 +1,6 @@
 const std = @import("std");
 const frontmatter = @import("frontmatter.zig");
+const markdown = @import("markdown.zig");
 
 pub const Spec = struct {
     path: []const u8,
@@ -14,19 +15,54 @@ pub const Spec = struct {
     }
 };
 
+fn isMarkdownTrackedPath(path: []const u8) bool {
+    return std.mem.endsWith(u8, path, ".md");
+}
+
+/// Append inline `@./` anchors from `content` into `anchors`, skipping duplicates of existing entries.
+fn mergeInlineAnchors(allocator: std.mem.Allocator, anchors: *std.ArrayList([]const u8), content: []const u8) !void {
+    var inline_anchors = parseInlineAnchors(allocator, content);
+    defer inline_anchors.deinit(allocator);
+
+    for (inline_anchors.items) |anchor| {
+        var already_bound = false;
+        for (anchors.items) |existing| {
+            if (std.mem.eql(u8, existing, anchor)) {
+                already_bound = true;
+                break;
+            }
+        }
+
+        if (already_bound) {
+            allocator.free(anchor);
+            continue;
+        }
+
+        try anchors.append(allocator, anchor);
+    }
+}
+
 /// Discover specs by listing git-tracked markdown files.
 /// Respects .gitignore — untracked/ignored files are never scanned.
+/// Uses `-z` (NUL-terminated paths) so unusual paths are raw bytes (newline mode C-escapes
+/// names with quotes). Filters `.md` in-process so pathspec globs are not required.
 pub fn findSpecs(allocator: std.mem.Allocator, specs: *std.ArrayList(Spec)) !void {
     const result = try std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &.{ "git", "ls-files", "--cached", "--others", "--exclude-standard", "*.md", "**/*.md" },
+        .argv = &.{ "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard" },
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    var iter = std.mem.splitScalar(u8, result.stdout, '\n');
-    while (iter.next()) |line| {
+    var offset: usize = 0;
+    while (offset < result.stdout.len) {
+        const rest = result.stdout[offset..];
+        const rel_end = std.mem.indexOfScalar(u8, rest, 0) orelse break;
+        const line = rest[0..rel_end];
+        offset += rel_end + 1;
+
         if (line.len == 0) continue;
+        if (!isMarkdownTrackedPath(line)) continue;
 
         const file_path = try allocator.dupe(u8, line);
 
@@ -37,15 +73,33 @@ pub fn findSpecs(allocator: std.mem.Allocator, specs: *std.ArrayList(Spec)) !voi
         defer allocator.free(content);
 
         if (frontmatter.parseDriftSpec(allocator, content)) |drift_spec| {
+            var spec = drift_spec;
+            errdefer {
+                for (spec.anchors.items) |b| allocator.free(b);
+                spec.anchors.deinit(allocator);
+                if (spec.origin) |o| allocator.free(o);
+            }
+            try mergeInlineAnchors(allocator, &spec.anchors, content);
             try specs.append(allocator, .{
                 .path = file_path,
-                .anchors = drift_spec.anchors,
-                .origin = drift_spec.origin,
+                .anchors = spec.anchors,
+                .origin = spec.origin,
             });
         } else {
             allocator.free(file_path);
         }
     }
+}
+
+/// Discover specs, merge inline anchors, and sort by path.
+pub fn findAndSortSpecs(allocator: std.mem.Allocator, specs: *std.ArrayList(Spec)) !void {
+    try findSpecs(allocator, specs);
+
+    std.mem.sort(Spec, specs.items, {}, struct {
+        fn lessThan(_: void, a: Spec, b: Spec) bool {
+            return std.mem.order(u8, a.path, b.path) == .lt;
+        }
+    }.lessThan);
 }
 
 /// Parse inline anchors (@./path references) from markdown content body.
@@ -79,7 +133,7 @@ pub fn parseInlineAnchors(allocator: std.mem.Allocator, content: []const u8) std
             const ref_pos = pos + offset;
 
             // Skip references inside fenced code blocks or inline backtick spans
-            if (isInCodeContext(content, body_offset + ref_pos)) {
+            if (markdown.isInCodeContext(content, body_offset + ref_pos)) {
                 pos = ref_pos + 3;
                 continue;
             }
@@ -129,7 +183,7 @@ pub fn updateInlineAnchors(
     change_id: []const u8,
 ) ![]const u8 {
     var output: std.ArrayList(u8) = .{};
-    defer output.deinit(allocator);
+    errdefer output.deinit(allocator);
     const writer = output.writer(allocator);
 
     var pos: usize = 0;
@@ -138,7 +192,7 @@ pub fn updateInlineAnchors(
             const ref_start = pos + offset; // position of '@' in "@./"
 
             // Skip references inside fenced code blocks or inline backtick spans
-            if (isInCodeContext(content, ref_start)) {
+            if (markdown.isInCodeContext(content, ref_start)) {
                 try writer.writeAll(content[pos .. ref_start + 3]);
                 pos = ref_start + 3;
                 continue;
@@ -199,11 +253,8 @@ pub fn updateInlineAnchors(
         }
     }
 
-    return try allocator.dupe(u8, output.items);
+    return try output.toOwnedSlice(allocator);
 }
-
-/// Returns true if `pos` in `text` falls inside a fenced code block or inline code span.
-pub const isInCodeContext = frontmatter.isInCodeContext;
 
 pub fn isPathTerminator(c: u8) bool {
     return c == ' ' or c == '\t' or c == '\n' or c == '\r';

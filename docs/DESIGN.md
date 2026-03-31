@@ -1,11 +1,11 @@
 ---
 drift:
   files:
-    - src/main.zig@sig:80171c2f3d2c2f4c
-    - src/frontmatter.zig@sig:ec04c25b0a6b05b2
-    - src/scanner.zig@sig:580c0f12170d4d35
-    - src/symbols.zig@sig:a31cb9bf8bd80d64
-    - src/vcs.zig@sig:1699bd9349c613a6
+    - src/main.zig@sig:1f0ab611cebf2ea0
+    - src/frontmatter.zig@sig:ef9880e4f1a96c16
+    - src/scanner.zig@sig:b65cd78a16cc56ae
+    - src/symbols.zig@sig:1f41e745e5e32c2d
+    - src/vcs.zig@sig:af1279e1afd6b10d
 ---
 
 # Design
@@ -22,22 +22,38 @@ drift makes the anchor between specs and code explicit and enforceable. Any mark
 
 ### Spec
 
-A spec is any markdown file with a `drift:` key in its YAML frontmatter. Specs can live anywhere in the repo. drift discovers them by scanning for the frontmatter marker.
+A spec is any markdown file with drift anchors. Anchors can live in YAML frontmatter or in `<!-- drift: ... -->` HTML comments (useful when you don't want frontmatter visible on GitHub). drift discovers specs by scanning all git-tracked markdown files for either marker.
 
 ```markdown
 ---
 drift:
   files:
-    - src/auth/login.ts@qpvuntsm
-    - src/auth/provider.ts#AuthConfig@qpvuntsm
+    - src/auth/login.ts@sig:e4f8a2c10b3d7890
+    - src/auth/provider.ts#AuthConfig@sig:1a2b3c4d5e6f7890
 ---
 
 # Auth Architecture
 
-The login flow uses @./src/auth/provider.ts#AuthConfig@qpvuntsm for token validation.
+The login flow uses @./src/auth/provider.ts#AuthConfig@sig:1a2b3c4d5e6f7890 for token validation.
 
 <!-- depends: docs/project.md -->
 ```
+
+Or equivalently with HTML comments (no frontmatter needed):
+
+```markdown
+# Auth Architecture
+
+<!-- drift:
+  files:
+    - src/auth/login.ts@sig:e4f8a2c10b3d7890
+    - src/auth/provider.ts#AuthConfig@sig:1a2b3c4d5e6f7890
+-->
+
+The login flow uses @./src/auth/provider.ts#AuthConfig@sig:1a2b3c4d5e6f7890 for token validation.
+```
+
+A spec can use both — `parseDriftSpec` merges anchors from frontmatter, HTML comments, and inline `@./` references into a single anchor list.
 
 ### Anchors
 
@@ -54,6 +70,7 @@ Each anchor can optionally carry provenance — a content signature or VCS refer
 - `src/auth/provider.ts#AuthConfig@sig:a1b2c3d4e5f6a7b8` — symbol anchor with content signature
 - `src/auth/login.ts@2d3a4080` — legacy format: bound file with VCS SHA provenance
 - In inline references: `@./src/auth/login.ts@sig:a1b2c3d4e5f6a7b8`
+- In HTML comments: `<!-- drift: files: - src/auth/login.ts@sig:... -->`
 
 The `@provenance` suffix is optional. Bare paths still work. Different anchors can have different provenance since each file tracks its own change independently. There is no separate `changes:` list.
 
@@ -107,9 +124,11 @@ Anchors with a plain git SHA or jj change ID as provenance (e.g. `src/auth/login
 
 1. For each anchor, determine its baseline provenance
 2. If provenance starts with `sig:` — recompute the fingerprint from disk and compare against the stored hex
-3. If provenance is a VCS ref — retrieve historical content via `git show <ref>:<file>`, compute fingerprints of both versions, compare
+3. If provenance is a VCS ref — retrieve historical content via `git cat-file --batch`, compute fingerprints of both versions, compare
 4. If no provenance — fall back to the last commit that modified the spec file
 5. If any anchor has changed after its baseline, the spec is stale
+
+File reads and historical content fetches are cached per lint run (`FileCache` in `main.zig`). When multiple anchors reference the same file or revision, the content is read once.
 
 Because provenance is per-anchor, updating one anchor's change reference doesn't affect staleness detection for other anchors in the same spec. A spec with three anchors can have two fresh and one stale.
 
@@ -148,38 +167,43 @@ docs/auth.md
 
 ```
                     ┌─────────────┐
-                    │  drift lint  │
+                    │   main.zig  │  CLI entry, arg parsing, dispatch
                     └──────┬──────┘
                            │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌────────────┐ ┌──────────┐ ┌─────────┐
-        │ scanner.zig│ │symbols.zig│ │ vcs.zig │
-        │            │ │          │ │         │
-        │ find spec  │ │ parse    │ │ git log │
-        │ files,     │ │ bound    │ │ jj log  │
-        │ extract    │ │ files,   │ │ blame   │
-        │ anchors    │ │ hash     │ │         │
-        │            │ │ symbols  │ │         │
-        └────────────┘ └──────────┘ └─────────┘
-              │            │            │
-              │       tree-sitter       │
-              │       (on demand)       │
-              └────────────┬────────────┘
-                           ▼
-                    ┌─────────────┐
-                    │   main.zig  │
-                    │  ok / stale │
-                    └─────────────┘
+           ┌───────┬───────┼───────┬────────┐
+           ▼       ▼       ▼       ▼        ▼
+        lint.zig status  link   unlink   (commands/)
+                  .zig   .zig    .zig
+           │
+           ├───────────────┼────────────┐
+           ▼               ▼            ▼
+     ┌────────────┐  ┌──────────┐ ┌─────────┐
+     │ scanner.zig│  │symbols.zig│ │ vcs.zig │
+     │            │  │          │ │         │
+     │ find spec  │  │ parse    │ │ git log │
+     │ files,     │  │ bound    │ │ jj log  │
+     │ extract    │  │ files,   │ │ blame   │
+     │ anchors    │  │ hash     │ │ cat-file│
+     │            │  │ symbols  │ │         │
+     └────────────┘  └──────────┘ └─────────┘
+           │              │            │
+           │         tree-sitter       │
+           │         (on demand)       │
+           └──────────────┬────────────┘
 ```
 
 Additional modules:
-- `frontmatter.zig` — YAML frontmatter parsing and editing
-- `main.zig` — CLI entry point, command dispatch, report formatting
+- `frontmatter.zig` — YAML frontmatter and `<!-- drift: ... -->` comment parsing and editing
+- `markdown.zig` — markdown-aware utilities: fenced code / inline code detection, frontmatter boundary parsing, drift comment marker search
+- `main.zig` — CLI entry point, argument parsing, subcommand dispatch
+- `commands/lint.zig` — lint engine: file/content caching, anchor staleness checks, report formatting
+- `commands/status.zig` — spec listing in text and JSON formats
+- `commands/link.zig` — anchor linking with auto-provenance (content signatures, VCS fallback)
+- `commands/unlink.zig` — anchor removal from frontmatter and comment blocks
 
 ### scanner.zig
 
-Lists git-tracked markdown files via `git ls-files`, respecting `.gitignore`. Parses frontmatter to extract explicit anchors. Parses content to extract implicit anchors (`@` references). No index — scans on every run. Performance is bounded by the number of markdown files, not the size of the codebase.
+Lists git-tracked markdown files via `git ls-files -z` (NUL-terminated output for robust handling of unusual paths), respecting `.gitignore`. Filters `.md` in-process rather than using pathspec globs. Parses frontmatter and `<!-- drift: ... -->` comments to extract explicit anchors. Parses content to extract inline anchors (`@./` references), merging them with explicit anchors while deduplicating. No index — scans on every run. Performance is bounded by the number of markdown files, not the size of the codebase.
 
 ### symbols.zig
 
@@ -197,8 +221,9 @@ Shells out to git or jj. Auto-detected from `.jj` (preferred) or `.git` director
 - `log`: find commits that modified a file after a given point
 - `blame`: get author/message for a commit
 - `rev-parse` / equivalent: resolve refs
+- `cat-file --batch`: persistent subprocess (`GitCatFile`) for fetching historical file content without spawning a new process per anchor
 
-No libgit2, no jj library. Subprocess cost is negligible for the number of queries drift makes.
+No libgit2, no jj library. `GitCatFile` keeps a single `git cat-file --batch` process alive for the duration of a lint run, feeding `rev:path` queries via stdin and reading blob content from stdout. All other VCS queries are one-shot subprocesses — the per-query cost is negligible for the number of queries drift makes.
 
 ## On-Disk Format
 

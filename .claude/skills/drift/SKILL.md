@@ -4,10 +4,10 @@ description: Drift spec-to-code anchor conventions. Use when editing code that i
 drift:
   origin: github:fiberplane/drift
   files:
-    - src/main.zig@sig:80171c2f3d2c2f4c
-    - src/frontmatter.zig@sig:ec04c25b0a6b05b2
-    - src/scanner.zig@sig:580c0f12170d4d35
-    - src/vcs.zig@sig:1699bd9349c613a6
+    - src/main.zig@sig:1f0ab611cebf2ea0
+    - src/frontmatter.zig@sig:ef9880e4f1a96c16
+    - src/scanner.zig@sig:b65cd78a16cc56ae
+    - src/vcs.zig@sig:af1279e1afd6b10d
 ---
 
 # Drift
@@ -100,12 +100,20 @@ drift:
     - src/auth/login.ts@2d3a4080                  # with VCS SHA (legacy)
 ```
 
+HTML comment (alternative to frontmatter, invisible on GitHub):
+```markdown
+<!-- drift:
+  files:
+    - src/auth/login.ts@sig:a1b2c3d4e5f6a7b8
+-->
+```
+
 Inline (in spec body):
 ```markdown
 The auth flow uses @./src/auth/provider.ts#AuthConfig for validation.
 ```
 
-`drift link` stamps both frontmatter and inline anchors with content signatures (`@sig:<hex>`). Content signatures are AST fingerprints of the target, so staleness detection works without querying VCS history. This means `drift link` works on uncommitted files — no need to commit first.
+`drift link` stamps frontmatter, HTML comment, and inline anchors with content signatures (`@sig:<hex>`). Content signatures are AST fingerprints of the target, so staleness detection works without querying VCS history. This means `drift link` works on uncommitted files — no need to commit first.
 
 ## Cross-repo specs (origin)
 
