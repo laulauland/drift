@@ -107,6 +107,17 @@ The auth flow uses @./src/auth/provider.ts#AuthConfig for validation.
 
 `drift link` stamps both frontmatter and inline anchors with content signatures (`@sig:<hex>`). Content signatures are AST fingerprints of the target, so staleness detection works without querying VCS history. This means `drift link` works on uncommitted files — no need to commit first.
 
+## Cross-repo specs (origin)
+
+Specs installed from other repos (like this skill) declare `origin: github:owner/repo` so `drift check` skips their anchors in consumer repos. If you're writing a spec that will be distributed to other repos, add origin to prevent false positives:
+
+```yaml
+drift:
+  origin: github:your-org/your-repo
+  files:
+    - src/main.ts@sig:a1b2c3d4e5f6a7b8
+```
+
 ## Staleness
 
 `drift check` exits 1 if any anchor is stale. For supported languages (TypeScript, Python, Rust, Go, Zig, Java), comparison is syntax-aware — formatting-only changes won't trigger staleness. Stale reports include git blame info (author, commit, message) so you know what changed and why.

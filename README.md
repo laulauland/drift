@@ -101,6 +101,19 @@ If you don't want frontmatter visible on GitHub, use an HTML comment instead:
 -->
 ```
 
+### Cross-repo specs (origin)
+
+Specs that travel across repo boundaries — installed skills, vendored docs, shared templates — can declare where their anchors belong:
+
+```yaml
+drift:
+  origin: github:fiberplane/drift
+  files:
+    - src/main.zig@sig:a1b2c3d4e5f67890
+```
+
+When `origin` is set and doesn't match the current repo, `drift check` skips those anchors instead of reporting false "file not found" errors. Specs without `origin` are always checked.
+
 ## Commands
 
 ```
