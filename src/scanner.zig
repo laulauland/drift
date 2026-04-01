@@ -50,6 +50,7 @@ pub fn findSpecs(allocator: std.mem.Allocator, specs: *std.ArrayList(Spec)) !voi
     const result = try std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard" },
+        .max_output_bytes = 10 * 1024 * 1024,
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);

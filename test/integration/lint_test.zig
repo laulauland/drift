@@ -534,3 +534,27 @@ test "lint includes blame info when anchored file changed after spec" {
     try helpers.expectContains(output, "changed by");
     try helpers.expectContains(output, "refactor: update main return value");
 }
+
+test "lint succeeds in repos with many tracked files (>50KB ls-files output)" {
+    const allocator = std.testing.allocator;
+    var repo = try helpers.TempRepo.init(allocator);
+    defer repo.cleanup();
+
+    // Generate enough tracked files to push `git ls-files -z` output past the
+    // old 50KB default limit.  ~1200 files x ~45 bytes/path > 50 KiB.
+    var name_buf: [64]u8 = undefined;
+    for (0..1200) |i| {
+        const name = try std.fmt.bufPrint(&name_buf, "src/gen/mod_{d:0>4}/component.ts", .{i});
+        try repo.writeFile(name, "export {};\n");
+    }
+
+    try repo.writeFile("src/target.ts", "export function target() {}\n");
+    try repo.writeSpec("docs/spec.md", &.{"src/target.ts"}, "# Spec\n");
+    try repo.commit("add many files and spec");
+
+    const result = try repo.runDrift(&.{"lint"});
+    defer result.deinit(allocator);
+
+    try helpers.expectExitCode(result.term, 0);
+    try helpers.expectContains(result.stdout, "ok");
+}

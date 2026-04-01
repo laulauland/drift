@@ -6,7 +6,7 @@ drift:
   files:
     - src/main.zig@sig:1f0ab611cebf2ea0
     - src/frontmatter.zig@sig:ef9880e4f1a96c16
-    - src/scanner.zig@sig:b65cd78a16cc56ae
+    - src/scanner.zig@sig:9ccfb8091a6c8ef2
     - src/vcs.zig@sig:af1279e1afd6b10d
 ---
 
